@@ -1,14 +1,29 @@
 @* Renders an area's custom FieldDefinitions for a project or task, editing the Properties JSON generically. *@
-@inject ApiClient Api
-@inject ToastService Toasts
+@inject AppState State
 
-@if (_fields.Count > 0)
+@if (Fields.Count > 0 && Compact)
+{
+    <div class="custom-chips">
+        @foreach (var f in Fields)
+        {
+            <span class="cf"><span class="cf-name" dir="auto">@f.Name</span>@Editor(f)</span>
+        }
+    </div>
+}
+else if (Fields.Count > 0)
 {
     <dl class="props custom">
-        @foreach (var f in _fields)
+        @foreach (var f in Fields)
         {
             <dt dir="auto">@f.Name</dt>
-            <dd>
+            <dd>@Editor(f)</dd>
+        }
+    </dl>
+}
+
+@code {
+    private RenderFragment Editor(FieldDefinitionDto f) => __builder =>
+    {
                 @switch (f.Type)
                 {
                     case FieldType.Text:
@@ -27,27 +42,16 @@
                         <InlineCheckbox Value="@GetBool(f.Key)" ValueChanged="v => SetBool(f.Key, v)" />
                         break;
                 }
-            </dd>
-        }
-    </dl>
-}
+    };
 
-@code {
     [Parameter] public Guid AreaId { get; set; }
     [Parameter] public FieldTarget Target { get; set; }
     [Parameter] public JsonObject? Properties { get; set; }
     [Parameter] public EventCallback<JsonObject?> PropertiesChanged { get; set; }
+    /// <summary>Chip layout for task rows instead of the label/value grid.</summary>
+    [Parameter] public bool Compact { get; set; }
 
-    private List<FieldDefinitionDto> _fields = new();
-    private Guid _loadedFor;
-
-    protected override async Task OnParametersSetAsync()
-    {
-        if (_loadedFor == AreaId) return;
-        _loadedFor = AreaId;
-        try { _fields = await Api.GetFields(AreaId, Target); }
-        catch (Exception ex) { Toasts.Error(ex); }
-    }
+    private List<FieldDefinitionDto> Fields => State.FieldsFor(AreaId, Target);
 
     private JsonNode? Node(string key) => Properties?[key];
     private string? GetString(string key) => Node(key) is JsonValue v ? v.ToString() : null;

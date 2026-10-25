@@ -1,0 +1,159 @@
+@page "/settings/fields/{AreaId:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>Custom fields · Cockpit</PageTitle>
+
+<div class="page">
+    <nav class="crumbs"><a href="settings">Settings</a> <span>/</span> <span>Custom fields</span></nav>
+    @if (_area is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else
+    {
+        <header class="page-head">
+            <h1 class="with-dot"><span class="dot big" style="background:@_area.Color"></span>@_area.Name <span class="muted h-sub">custom fields</span></h1>
+            <button type="button" class="link small" @onclick="() => _showArchived = !_showArchived">@(_showArchived ? "hide archived" : "show archived")</button>
+        </header>
+        <p class="muted small">Fields appear on every project or task of this area and are edited inline there. Values are stored in the item's JSON properties under the key shown; the key never changes, so renaming a field keeps its data. No migration, no code.</p>
+
+        @foreach (var target in new[] { FieldTarget.Project, FieldTarget.Task })
+        {
+            var list = _fields.Where(f => f.AppliesTo == target && (_showArchived || !f.Archived)).OrderBy(f => f.SortOrder).ThenBy(f => f.Name).ToList();
+            <section class="group">
+                <h2 class="group-head">On @Format.Label(target).ToLowerInvariant()s <span class="count">@list.Count</span></h2>
+                @for (var i = 0; i < list.Count; i++)
+                {
+                    var f = list[i];
+                    var isFirst = i == 0; var isLast = i == list.Count - 1;
+                    <div class="card field-def @(f.Archived ? "archived" : "")" @key="f.Id">
+                        <div class="field-def-main">
+                            <InlineText Value="@f.Name" ValueChanged="v => Save(f, x => x.Name = v ?? x.Name)" NullIfEmpty="false" Class="field-name" />
+                            <code class="key" title="Key inside properties JSON">@f.Key</code>
+                            <InlineSelect TValue="FieldType" Value="@f.Type" ValueChanged="v => Save(f, x => x.Type = v!.Value)" Class="tiny" Title="Type" />
+                        </div>
+                        @if (f.Type == FieldType.Select)
+                        {
+                            <div class="field-def-options">
+                                <span class="muted small">options:</span>
+                                <InlineText Value="@string.Join(", ", f.Options)" ValueChanged="v => Save(f, x => x.Options = SplitOptions(v))" Placeholder="option one, option two" NullIfEmpty="false" />
+                            </div>
+                        }
+                        <div class="field-def-actions">
+                            <button type="button" class="icon-btn" title="Move up" disabled="@isFirst" @onclick="() => Swap(list, i, i - 1)">↑</button>
+                            <button type="button" class="icon-btn" title="Move down" disabled="@isLast" @onclick="() => Swap(list, i, i + 1)">↓</button>
+                            <button type="button" class="link small" @onclick="() => Save(f, x => x.Archived = !x.Archived)">@(f.Archived ? "unarchive" : "archive")</button>
+                            <button type="button" class="link small danger" @onclick="() => Delete(f)">delete</button>
+                        </div>
+                    </div>
+                }
+                <form class="add-row wrap" @onsubmit="() => Add(target)" @onsubmit:preventDefault>
+                    <input class="input" dir="auto" placeholder="New field name…" value="@NewName(target)" @oninput="e => SetNewName(target, e.Value?.ToString() ?? string.Empty)" autocomplete="off" />
+                    <InlineSelect TValue="FieldType" Value="@NewType(target)" ValueChanged="v => SetNewType(target, v!.Value)" Title="Type" />
+                    @if (NewType(target) == FieldType.Select)
+                    {
+                        <input class="input" dir="auto" placeholder="options, comma separated" value="@NewOptions(target)" @oninput="e => SetNewOptions(target, e.Value?.ToString() ?? string.Empty)" />
+                    }
+                    <button type="submit" class="btn" disabled="@string.IsNullOrWhiteSpace(NewName(target))">Add</button>
+                </form>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public Guid AreaId { get; set; }
+
+    private AreaDto? _area;
+    private List<FieldDefinitionDto> _fields = new();
+    private bool _showArchived;
+    private readonly Dictionary<FieldTarget, (string Name, FieldType Type, string Options)> _new = new()
+    {
+        [FieldTarget.Project] = ("", FieldType.Text, ""),
+        [FieldTarget.Task] = ("", FieldType.Text, ""),
+    };
+
+    private string NewName(FieldTarget t) => _new[t].Name;
+    private FieldType NewType(FieldTarget t) => _new[t].Type;
+    private string NewOptions(FieldTarget t) => _new[t].Options;
+    private void SetNewName(FieldTarget t, string v) => _new[t] = (v, _new[t].Type, _new[t].Options);
+    private void SetNewType(FieldTarget t, FieldType v) => _new[t] = (_new[t].Name, v, _new[t].Options);
+    private void SetNewOptions(FieldTarget t, string v) => _new[t] = (_new[t].Name, _new[t].Type, v);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _area = await Api.GetArea(AreaId);
+            _fields = await Api.GetFields(AreaId, includeArchived: true);
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private static List<string> SplitOptions(string? raw) =>
+        (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToList();
+
+    private async Task Save(FieldDefinitionDto f, Action<FieldDefinitionDto> mutate)
+    {
+        var snapshot = System.Text.Json.JsonSerializer.Serialize(f, CockpitJson.Options);
+        mutate(f);
+        try
+        {
+            var saved = await Api.SaveField(f);
+            var idx = _fields.FindIndex(x => x.Id == f.Id);
+            if (idx >= 0) _fields[idx] = saved;
+            await State.RefreshFieldsAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex);
+            var idx = _fields.FindIndex(x => x.Id == f.Id);
+            if (idx >= 0) _fields[idx] = System.Text.Json.JsonSerializer.Deserialize<FieldDefinitionDto>(snapshot, CockpitJson.Options)!;
+        }
+    }
+
+    private async Task Swap(List<FieldDefinitionDto> list, int i, int j)
+    {
+        if (j < 0 || j >= list.Count) return;
+        var a = list[i]; var b = list[j];
+        (a.SortOrder, b.SortOrder) = (j + 1, i + 1);
+        // make sure the rest of the list keeps distinct, ordered values
+        for (var k = 0; k < list.Count; k++) if (k != i && k != j) list[k].SortOrder = k + 1;
+        try
+        {
+            foreach (var f in list) await Api.SaveField(f);
+            await State.RefreshFieldsAsync();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Add(FieldTarget target)
+    {
+        var (name, type, options) = _new[target];
+        if (string.IsNullOrWhiteSpace(name)) return;
+        try
+        {
+            var created = await Api.CreateField(new FieldDefinitionDto { AreaId = AreaId, AppliesTo = target, Name = name.Trim(), Type = type, Options = SplitOptions(options) });
+            _fields.Add(created);
+            _new[target] = ("", FieldType.Text, "");
+            await State.RefreshFieldsAsync();
+            Toasts.Success($"Added “{created.Name}” ({created.Key}).");
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Delete(FieldDefinitionDto f)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete field “{f.Name}”? Existing values stay in the items' JSON but will no longer be shown.")) return;
+        try
+        {
+            await Api.DeleteField(f.Id);
+            _fields.Remove(f);
+            await State.RefreshFieldsAsync();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}

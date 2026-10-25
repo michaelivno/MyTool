@@ -277,3 +277,20 @@ input, select, textarea { font: inherit; color: inherit; }
 
 #blazor-error-ui { display: none; position: fixed; bottom: 0; inset-inline: 0; background: var(--warn-soft); color: var(--warn); padding: 10px 14px; z-index: 100; }
 #blazor-error-ui .dismiss { cursor: pointer; float: inline-end; }
+
+/* custom fields */
+.custom-chips { display: flex; gap: 6px 10px; flex-wrap: wrap; margin-top: 4px; }
+.cf { display: inline-flex; align-items: center; gap: 4px; font-size: .8rem; }
+.cf-name { color: var(--muted); }
+.cf .inline-display { font-size: .82rem; } .cf .inline-number { width: 90px; min-height: 28px; padding: 2px 6px; }
+.field-def { margin-bottom: 8px; }
+.field-def.archived { opacity: .55; }
+.field-def-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.field-def .field-name { font-weight: 600; }
+.field-def .key { font-size: .75rem; color: var(--muted); background: var(--surface-2); padding: 2px 6px; border-radius: 6px; }
+.field-def-options { display: flex; gap: 8px; align-items: baseline; margin-top: 6px; }
+.field-def-actions { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.field-def-actions .icon-btn { width: 32px; height: 32px; font-size: 1rem; }
+.link.danger { color: var(--danger); }
+.add-row.wrap { flex-wrap: wrap; }
+.add-row.wrap .input { flex: 1 1 180px; }

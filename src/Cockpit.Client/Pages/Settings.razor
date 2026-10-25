@@ -29,6 +29,7 @@
                 <InlineSelect TValue="AreaKind" Value="@a.Kind" ValueChanged="v => SaveArea(a, x => x.Kind = v!.Value)" Class="tiny" Title="Kind" />
                 <InlineSelect TValue="ReviewCadence" Value="@a.ReviewCadence" ValueChanged="v => SaveArea(a, x => x.ReviewCadence = v!.Value)" Class="tiny" Title="Review cadence" />
                 <a class="link small" href="areas/@a.Id">open</a>
+                <a class="link small" href="settings/fields/@a.Id">fields</a>
                 <button type="button" class="link small" @onclick="() => SaveArea(a, x => x.Archived = !x.Archived)">@(a.Archived ? "unarchive" : "archive")</button>
             </div>
         }

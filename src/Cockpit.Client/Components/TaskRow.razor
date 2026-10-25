@@ -29,6 +29,7 @@
                 <InlineTags Value="@Task.Tags" ValueChanged="v => Save(t => t.Tags = v)" />
             }
         </div>
+        <CustomFields AreaId="Task.AreaId" Target="FieldTarget.Task" Properties="Task.Properties" PropertiesChanged="v => Save(t => t.Properties = v)" Compact="true" />
     </div>
     <button type="button" class="icon-btn" aria-label="Task actions" @onclick="() => _menu = true">⋯</button>
 </div>
@@ -82,7 +83,7 @@
         {
             var saved = await Api.SaveTask(Task);
             Task.Status = saved.Status; Task.CompletedAt = saved.CompletedAt; Task.UpdatedAt = saved.UpdatedAt;
-            Task.AreaId = saved.AreaId; Task.Tags = saved.Tags; Task.Title = saved.Title;
+            Task.AreaId = saved.AreaId; Task.Tags = saved.Tags; Task.Title = saved.Title; Task.Properties = saved.Properties;
             await OnChanged.InvokeAsync(Task);
             _ = State.RefreshNavAsync();
         }
@@ -90,7 +91,7 @@
         {
             Toasts.Error(ex);
             var restored = System.Text.Json.JsonSerializer.Deserialize<TaskDto>(before, CockpitJson.Options)!;
-            Task.Title = restored.Title; Task.Status = restored.Status; Task.Due = restored.Due; Task.Effort = restored.Effort; Task.Tags = restored.Tags;
+            Task.Title = restored.Title; Task.Status = restored.Status; Task.Due = restored.Due; Task.Effort = restored.Effort; Task.Tags = restored.Tags; Task.Properties = restored.Properties;
         }
     }
 
