@@ -1,0 +1,11 @@
+<div class="empty-state">
+    @if (!string.IsNullOrEmpty(Icon)) { <div class="empty-icon">@Icon</div> }
+    <p dir="auto">@Text</p>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public string Text { get; set; } = "Nothing here.";
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

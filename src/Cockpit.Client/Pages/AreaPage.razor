@@ -1,0 +1,95 @@
+@page "/areas/{Id:guid}"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>@(_area?.Name ?? "Area") · Cockpit</PageTitle>
+
+<div class="page">
+    @if (_area is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else
+    {
+        <nav class="crumbs"><a href="areas">Areas</a> <span>/</span></nav>
+        <header class="page-head">
+            <h1 class="with-dot"><span class="dot big" style="background:@_area.Color"></span><InlineText Value="@_area.Name" ValueChanged="v => Save(a => a.Name = v ?? a.Name)" NullIfEmpty="false" Class="h1" /></h1>
+        </header>
+        <div class="field-row">
+            <InlineSelect TValue="AreaKind" Value="@_area.Kind" ValueChanged="v => Save(a => a.Kind = v!.Value)" Title="Kind" />
+            <InlineSelect TValue="ReviewCadence" Value="@_area.ReviewCadence" ValueChanged="v => Save(a => a.ReviewCadence = v!.Value)" Title="Review cadence" Prefix="Review: " />
+            <label class="color-pick" title="Color"><input type="color" value="@_area.Color" @onchange="e => Save(a => a.Color = e.Value?.ToString() ?? a.Color)" /></label>
+        </div>
+
+        <section class="group">
+            <h2 class="group-head">Projects <span class="count">@_cards.Count(c => !c.Project.Status.IsClosed())</span> <a class="link small" href="board">board</a></h2>
+            <div class="card-grid">
+                @foreach (var c in _cards.Where(c => !c.Project.Status.IsClosed()).OrderBy(c => c.Project.Status))
+                {
+                    <ProjectCard @key="c.Project.Id" Card="c" OnMove="s => Move(c.Project, s)" />
+                }
+            </div>
+        </section>
+
+        <section class="group">
+            <h2 class="group-head">Tasks directly on this area <span class="count">@_tasks.Count(t => t.Status.IsOpen())</span></h2>
+            <form class="add-row" @onsubmit="AddTask" @onsubmit:preventDefault>
+                <input class="input" dir="auto" placeholder="Quick task for this area…" value="@_newTask" @oninput="e => _newTask = e.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                <button type="submit" class="btn" disabled="@string.IsNullOrWhiteSpace(_newTask)">Add</button>
+            </form>
+            @foreach (var t in _tasks.Where(t => t.Status.IsOpen()))
+            {
+                <TaskRow @key="t.Id" Task="t" OnDeleted="d => _tasks.Remove(d)" />
+            }
+        </section>
+    }
+</div>
+
+<StatusFlow @ref="_flow" />
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    private AreaDto? _area;
+    private List<ProjectCardDto> _cards = new();
+    private List<TaskDto> _tasks = new();
+    private string _newTask = "";
+    private StatusFlow _flow = default!;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _area = await Api.GetArea(Id);
+            var board = await Api.GetBoard(Id);
+            _cards = board.Cards;
+            _tasks = (await Api.GetTasks(areaId: Id, includeClosed: false)).Where(t => t.ProjectId is null).ToList();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Save(Action<AreaDto> mutate)
+    {
+        if (_area is null) return;
+        mutate(_area);
+        try { _area = await Api.SaveArea(_area); await State.RefreshAreasAsync(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Move(ProjectDto p, ProjectStatus s)
+    {
+        if (await _flow.ChangeStatusAsync(p, s) is not null) _cards = (await Api.GetBoard(Id)).Cards;
+    }
+
+    private async Task AddTask()
+    {
+        if (_area is null || string.IsNullOrWhiteSpace(_newTask)) return;
+        try
+        {
+            _tasks.Add(await Api.CreateTask(new TaskDto { AreaId = _area.Id, Title = _newTask.Trim() }));
+            _newTask = "";
+            _ = State.RefreshNavAsync();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}

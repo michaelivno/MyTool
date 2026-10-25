@@ -1,0 +1,35 @@
+@* Pinned capture box: whatever you type lands in the Inbox. *@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject AppState State
+
+<form class="capture @Class" @onsubmit="Submit" @onsubmit:preventDefault>
+    <input class="capture-input" dir="auto" placeholder="@Placeholder" value="@_text" @oninput="e => _text = e.Value?.ToString() ?? string.Empty" enterkeyhint="send" autocomplete="off" />
+    <button type="submit" class="btn primary" disabled="@(string.IsNullOrWhiteSpace(_text) || _busy)">Capture</button>
+</form>
+
+@code {
+    [Parameter] public string Placeholder { get; set; } = "Capture anything… it goes to Inbox";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public EventCallback<InboxItemDto> OnCaptured { get; set; }
+
+    private string _text = "";
+    private bool _busy;
+
+    private async Task Submit()
+    {
+        var text = _text.Trim();
+        if (text.Length == 0 || _busy) return;
+        _busy = true;
+        try
+        {
+            var item = await Api.Capture(text);
+            _text = "";
+            Toasts.Success("Captured to Inbox.");
+            await OnCaptured.InvokeAsync(item);
+            _ = State.RefreshNavAsync();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+        finally { _busy = false; }
+    }
+}

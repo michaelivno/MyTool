@@ -1,0 +1,164 @@
+@page "/board"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+
+<PageTitle>Projects · Cockpit</PageTitle>
+
+<div class="page page-wide">
+    <header class="page-head">
+        <h1>Projects</h1>
+        <div class="head-actions">
+            @if (_view is not null)
+            {
+                <span class="wip @(_view.ActiveCount >= _view.WipLimit ? "full" : "")" title="Active projects / WIP limit">@_view.ActiveCount/@_view.WipLimit active</span>
+            }
+            <InlineChoice Value="@(_areaFilter?.ToString())" ValueChanged="OnAreaFilter" Options="AreaOptions" AllowEmpty="true" EmptyLabel="All areas" />
+            <button type="button" class="btn primary" @onclick="OpenNew">+ Project</button>
+        </div>
+    </header>
+
+    <div class="col-tabs">
+        @foreach (var s in Columns)
+        {
+            <button type="button" class="tab @(s == _tab ? "active" : "")" @onclick="() => _tab = s">@Format.Label(s) <span class="count">@Count(s)</span></button>
+        }
+    </div>
+
+    @if (_view is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else
+    {
+        <div class="board">
+            @foreach (var status in Columns)
+            {
+                <section class="column @(status == _tab ? "shown" : "") @(_dragOver == status ? "drag-over" : "")"
+                         @ondragover:preventDefault @ondragenter:preventDefault
+                         @ondragover="() => _dragOver = status" @ondragleave="() => _dragOver = null" @ondrop="() => Drop(status)">
+                    <h2 class="col-head">@Format.Label(status) <span class="count">@Count(status)</span>
+                        @if (status == ProjectStatus.Done && DroppedCount > 0)
+                        {
+                            <button type="button" class="link small" @onclick="() => _showDropped = !_showDropped">@(_showDropped ? "hide" : "show") dropped (@DroppedCount)</button>
+                        }
+                    </h2>
+                    @foreach (var card in Cards(status))
+                    {
+                        <ProjectCard @key="card.Project.Id" Card="card" Draggable="true" OnDragStart="id => _dragging = id" OnMove="s => Move(card.Project, s)" />
+                    }
+                    @if (!Cards(status).Any())
+                    {
+                        <EmptyState Text="@EmptyText(status)" />
+                    }
+                </section>
+            }
+        </div>
+    }
+</div>
+
+<StatusFlow @ref="_flow" />
+
+<Sheet Open="_newOpen" Title="New project" OnClose="() => _newOpen = false">
+    <label class="field-label">Name</label>
+    <input class="input" dir="auto" placeholder="What is it?" value="@_new.Name" @oninput="e => _new.Name = e.Value?.ToString() ?? string.Empty" />
+    <label class="field-label">Area</label>
+    <InlineChoice Value="@(_new.AreaId == Guid.Empty ? null : _new.AreaId.ToString())" ValueChanged="v => _new.AreaId = Guid.TryParse(v, out var g) ? g : Guid.Empty" Options="AreaOptions" AllowEmpty="true" EmptyLabel="Pick an area" Class="wide" />
+    <label class="field-label">Start as</label>
+    <div class="seg">
+        <button type="button" class="seg-item @(_new.Status == ProjectStatus.Parked ? "active" : "")" @onclick="() => _new.Status = ProjectStatus.Parked">Parked</button>
+        <button type="button" class="seg-item @(_new.Status == ProjectStatus.Active ? "active" : "")" @onclick="() => _new.Status = ProjectStatus.Active">Active</button>
+    </div>
+    @if (_new.Status == ProjectStatus.Parked)
+    {
+        <label class="field-label">Revisit on</label>
+        <input type="date" class="input" value="@(_new.RevisitAt?.ToString("yyyy-MM-dd"))" @onchange="e => _new.RevisitAt = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null" />
+    }
+    <div class="sheet-actions">
+        <button type="button" class="btn" @onclick="() => _newOpen = false">Cancel</button>
+        <button type="button" class="btn primary" disabled="@(string.IsNullOrWhiteSpace(_new.Name) || _new.AreaId == Guid.Empty)" @onclick="Create">Create</button>
+    </div>
+</Sheet>
+
+@code {
+    private static readonly ProjectStatus[] Columns = { ProjectStatus.Active, ProjectStatus.Parked, ProjectStatus.Done };
+
+    private BoardView? _view;
+    private Guid? _areaFilter;
+    private ProjectStatus _tab = ProjectStatus.Active;
+    private ProjectStatus? _dragOver;
+    private Guid? _dragging;
+    private bool _showDropped;
+    private bool _newOpen;
+    private ProjectDto _new = new();
+    private StatusFlow _flow = default!;
+
+    private IReadOnlyList<InlineChoice.Option> AreaOptions => State.Areas.Select(a => new InlineChoice.Option(a.Id.ToString(), a.Name)).ToList();
+
+    protected override Task OnInitializedAsync() => Reload();
+
+    private async Task Reload()
+    {
+        try { _view = await Api.GetBoard(_areaFilter); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task OnAreaFilter(string? v)
+    {
+        _areaFilter = Guid.TryParse(v, out var g) ? g : null;
+        await Reload();
+    }
+
+    private IEnumerable<ProjectCardDto> Cards(ProjectStatus status)
+    {
+        if (_view is null) return Array.Empty<ProjectCardDto>();
+        if (status == ProjectStatus.Done)
+        {
+            var closed = _view.Cards.Where(c => c.Project.Status == ProjectStatus.Done || (_showDropped && c.Project.Status == ProjectStatus.Dropped));
+            return closed.OrderByDescending(c => c.Project.CompletedAt ?? c.Project.UpdatedAt);
+        }
+        return _view.Cards.Where(c => c.Project.Status == status);
+    }
+
+    private int Count(ProjectStatus s) => _view?.Cards.Count(c => c.Project.Status == s) ?? 0;
+    private int DroppedCount => Count(ProjectStatus.Dropped);
+
+    private static string EmptyText(ProjectStatus s) => s switch
+    {
+        ProjectStatus.Active => "No active projects. Pick up to three from Parked.",
+        ProjectStatus.Parked => "Nothing parked.",
+        _ => "Nothing finished yet.",
+    };
+
+    private async Task Drop(ProjectStatus status)
+    {
+        _dragOver = null;
+        if (_dragging is not { } id || _view is null) return;
+        _dragging = null;
+        var card = _view.Cards.FirstOrDefault(c => c.Project.Id == id);
+        if (card is null || card.Project.Status == status) return;
+        await Move(card.Project, status);
+    }
+
+    private async Task Move(ProjectDto p, ProjectStatus s)
+    {
+        if (await _flow.ChangeStatusAsync(p, s) is not null) await Reload();
+    }
+
+    private void OpenNew()
+    {
+        _new = new ProjectDto { Status = ProjectStatus.Parked, RevisitAt = ApiClient.Today.AddDays(30), AreaId = _areaFilter ?? Guid.Empty };
+        _newOpen = true;
+    }
+
+    private async Task Create()
+    {
+        if (_new.Status == ProjectStatus.Active) _new.RevisitAt = null;
+        var created = await _flow.CreateAsync(_new);
+        if (created is null) return;
+        _newOpen = false;
+        _tab = created.Status == ProjectStatus.Active ? ProjectStatus.Active : ProjectStatus.Parked;
+        Toasts.Success($"Created “{created.Name}”.");
+        await Reload();
+    }
+}

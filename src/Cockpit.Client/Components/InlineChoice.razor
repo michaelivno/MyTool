@@ -1,0 +1,33 @@
+@* String-valued picker (areas, projects, custom select fields). *@
+<select class="chip-select @Class @(string.IsNullOrEmpty(Value) ? "empty" : "")" value="@(Value ?? "")" @onchange="e => ValueChanged.InvokeAsync(string.IsNullOrEmpty(e.Value?.ToString()) ? null : e.Value!.ToString())" title="@Title" disabled="@Disabled">
+    @if (AllowEmpty)
+    {
+        <option value="">@EmptyLabel</option>
+    }
+    @foreach (var group in Options.GroupBy(o => o.Group))
+    {
+        if (string.IsNullOrEmpty(group.Key))
+        {
+            foreach (var o in group) { <option value="@o.Value">@o.Label</option> }
+        }
+        else
+        {
+            <optgroup label="@group.Key">
+                @foreach (var o in group) { <option value="@o.Value">@o.Label</option> }
+            </optgroup>
+        }
+    }
+</select>
+
+@code {
+    public sealed record Option(string Value, string Label, string? Group = null);
+
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IReadOnlyList<Option> Options { get; set; } = Array.Empty<Option>();
+    [Parameter] public bool AllowEmpty { get; set; }
+    [Parameter] public string EmptyLabel { get; set; } = "—";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+}

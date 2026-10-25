@@ -1,0 +1,165 @@
+@* Owns the two rule-driven prompts: "parked needs a revisit date" and "WIP limit: park one first".
+   Pages call ChangeStatusAsync(project, newStatus); it returns the saved project or null if cancelled. *@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject AppState State
+
+<Sheet Open="_revisitOpen" Title="When should you revisit it?" OnClose="() => CancelRevisit()">
+    <p class="muted" dir="auto">Parked means decided: pick the date <strong>@_project?.Name</strong> comes back to “Decide”.</p>
+    <div class="quick-dates">
+        @foreach (var (label, days) in QuickDates)
+        {
+            <button type="button" class="btn" @onclick="() => _revisitDraft = ApiClient.Today.AddDays(days)">@label</button>
+        }
+    </div>
+    <input type="date" class="input" value="@_revisitDraft.ToString("yyyy-MM-dd")" @onchange="e => _revisitDraft = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : _revisitDraft" />
+    <div class="sheet-actions">
+        <button type="button" class="btn" @onclick="() => CancelRevisit()">Cancel</button>
+        <button type="button" class="btn primary" @onclick="ConfirmRevisit">Park until @Format.Date(_revisitDraft)</button>
+    </div>
+</Sheet>
+
+<Sheet Open="_wipOpen" Title="WIP limit reached" OnClose="() => CancelWip()">
+    <p class="muted" dir="auto">You already have <strong>@_wipError?.Limit</strong> active projects. Park one to make room for <strong>@_project?.Name</strong>:</p>
+    <div class="pick-list">
+        @foreach (var p in _wipError?.ActiveProjects ?? new())
+        {
+            <button type="button" class="pick-item @(p.Id == _parkChoice ? "selected" : "")" @onclick="() => _parkChoice = p.Id">
+                <AreaChip Name="@p.AreaName" Color="@p.AreaColor" />
+                <span class="pick-name" dir="auto">@p.Name</span>
+            </button>
+        }
+    </div>
+    @if (_parkChoice is not null)
+    {
+        <label class="field-label">Revisit the parked one on</label>
+        <div class="quick-dates">
+            @foreach (var (label, days) in QuickDates)
+            {
+                <button type="button" class="btn" @onclick="() => _parkRevisit = ApiClient.Today.AddDays(days)">@label</button>
+            }
+        </div>
+        <input type="date" class="input" value="@_parkRevisit.ToString("yyyy-MM-dd")" @onchange="e => _parkRevisit = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : _parkRevisit" />
+    }
+    <div class="sheet-actions">
+        <button type="button" class="btn" @onclick="() => CancelWip()">Keep as is</button>
+        <button type="button" class="btn primary" disabled="@(_parkChoice is null)" @onclick="ConfirmWip">Park it &amp; activate</button>
+    </div>
+</Sheet>
+
+@code {
+    private static readonly (string, int)[] QuickDates = { ("1 week", 7), ("2 weeks", 14), ("1 month", 30), ("3 months", 90) };
+
+    private ProjectDto? _project;
+    private bool _revisitOpen, _wipOpen;
+    private DateOnly _revisitDraft = ApiClient.Today.AddDays(30);
+    private TaskCompletionSource<DateOnly?>? _revisitTcs;
+    private ApiError? _wipError;
+    private Guid? _parkChoice;
+    private DateOnly _parkRevisit = ApiClient.Today.AddDays(30);
+    private TaskCompletionSource<(Guid Id, DateOnly Revisit)?>? _wipTcs;
+
+    /// <summary>Changes status with the rules applied interactively. Mutates and returns the saved project, or null when cancelled.</summary>
+    public async Task<ProjectDto?> ChangeStatusAsync(ProjectDto project, ProjectStatus status)
+    {
+        _project = project;
+        var original = (project.Status, project.RevisitAt);
+        project.Status = status;
+        if (status == ProjectStatus.Parked)
+        {
+            if (project.RevisitAt is null || project.RevisitAt <= ApiClient.Today)
+            {
+                var date = await AskRevisitAsync();
+                if (date is null) { (project.Status, project.RevisitAt) = original; return null; }
+                project.RevisitAt = date;
+            }
+        }
+        else if (status == ProjectStatus.Active)
+        {
+            project.RevisitAt = null;
+        }
+        return await SaveAsync(project, original);
+    }
+
+    /// <summary>Saves any edit; if the server answers "WIP limit", offers to park one first and retries.</summary>
+    public Task<ProjectDto?> SaveAsync(ProjectDto project, (ProjectStatus, DateOnly?)? rollback = null)
+        => ExecuteAsync(project, () => Api.SaveProject(project), rollback);
+
+    /// <summary>Creates a project with the same interactive handling of the rules.</summary>
+    public Task<ProjectDto?> CreateAsync(ProjectDto project)
+        => ExecuteAsync(project, () => Api.CreateProject(project), null);
+
+    private async Task<ProjectDto?> ExecuteAsync(ProjectDto project, Func<Task<ProjectDto>> op, (ProjectStatus, DateOnly?)? rollback)
+    {
+        _project = project;
+        try
+        {
+            Copy(await op(), project);
+            _ = State.RefreshNavAsync();
+            return project;
+        }
+        catch (ApiException ex) when (ex.IsWipLimit)
+        {
+            var choice = await AskWipAsync(ex.Error);
+            if (choice is null) { Rollback(project, rollback); return null; }
+            try
+            {
+                var toPark = await Api.GetProject(choice.Value.Id);
+                toPark.Status = ProjectStatus.Parked;
+                toPark.RevisitAt = choice.Value.Revisit;
+                await Api.SaveProject(toPark);
+                Copy(await op(), project);
+                Toasts.Success($"Parked “{toPark.Name}”, activated “{project.Name}”.");
+                _ = State.RefreshNavAsync();
+                return project;
+            }
+            catch (Exception inner) { Toasts.Error(inner); Rollback(project, rollback); return null; }
+        }
+        catch (ApiException ex) when (ex.IsParkedNeedsRevisit)
+        {
+            var date = await AskRevisitAsync();
+            if (date is null) { Rollback(project, rollback); return null; }
+            project.RevisitAt = date;
+            return await ExecuteAsync(project, op, rollback);
+        }
+        catch (Exception ex) { Toasts.Error(ex); Rollback(project, rollback); return null; }
+    }
+
+    private static void Rollback(ProjectDto p, (ProjectStatus Status, DateOnly? Revisit)? rollback)
+    {
+        if (rollback is { } r) { p.Status = r.Status; p.RevisitAt = r.Revisit; }
+    }
+
+    private static void Copy(ProjectDto from, ProjectDto to)
+    {
+        to.Id = from.Id; to.CreatedAt = from.CreatedAt; to.Status = from.Status; to.RevisitAt = from.RevisitAt; to.CompletedAt = from.CompletedAt; to.UpdatedAt = from.UpdatedAt;
+        to.SortOrder = from.SortOrder; to.Name = from.Name; to.Goal = from.Goal; to.NextMilestone = from.NextMilestone;
+        to.Deadline = from.Deadline; to.Priority = from.Priority; to.Notes = from.Notes; to.Properties = from.Properties; to.AreaId = from.AreaId;
+    }
+
+    private Task<DateOnly?> AskRevisitAsync()
+    {
+        _revisitDraft = ApiClient.Today.AddDays(30);
+        _revisitTcs = new TaskCompletionSource<DateOnly?>();
+        _revisitOpen = true;
+        StateHasChanged();
+        return _revisitTcs.Task;
+    }
+
+    private void ConfirmRevisit() { _revisitOpen = false; _revisitTcs?.TrySetResult(_revisitDraft); }
+    private void CancelRevisit() { _revisitOpen = false; _revisitTcs?.TrySetResult(null); }
+
+    private Task<(Guid Id, DateOnly Revisit)?> AskWipAsync(ApiError error)
+    {
+        _wipError = error;
+        _parkChoice = null;
+        _parkRevisit = ApiClient.Today.AddDays(30);
+        _wipTcs = new TaskCompletionSource<(Guid Id, DateOnly Revisit)?>();
+        _wipOpen = true;
+        StateHasChanged();
+        return _wipTcs.Task;
+    }
+
+    private void ConfirmWip() { if (_parkChoice is null) return; _wipOpen = false; _wipTcs?.TrySetResult((_parkChoice.Value, _parkRevisit)); }
+    private void CancelWip() { _wipOpen = false; _wipTcs?.TrySetResult(null); }
+}

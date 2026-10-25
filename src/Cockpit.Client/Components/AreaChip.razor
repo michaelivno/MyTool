@@ -1,0 +1,7 @@
+<span class="area-chip @Class" title="@Name"><span class="dot" style="background:@Color"></span><span dir="auto">@Name</span></span>
+
+@code {
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string Color { get; set; } = "#6b7280";
+    [Parameter] public string? Class { get; set; }
+}

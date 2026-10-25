@@ -1,0 +1,55 @@
+@page "/decide"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>Decide · Cockpit</PageTitle>
+
+<div class="page">
+    <header class="page-head"><h1>Decide <span class="muted h-sub">parked projects whose revisit date has passed</span></h1></header>
+
+    @if (_view is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_view.Projects.Count == 0)
+    {
+        <EmptyState Icon="⚖" Text="Nothing to decide. Every parked project has a future revisit date." />
+    }
+    else
+    {
+        foreach (var card in _view.Projects)
+        {
+            <article class="card decide-card" @key="card.Project.Id">
+                <ProjectCard Card="card" OnMove="s => Move(card.Project, s)" />
+                <div class="decide-actions">
+                    <button type="button" class="btn primary" @onclick="() => Move(card.Project, ProjectStatus.Active)">Activate</button>
+                    <button type="button" class="btn" @onclick="() => Move(card.Project, ProjectStatus.Parked)">Park again…</button>
+                    <button type="button" class="btn" @onclick="() => Move(card.Project, ProjectStatus.Done)">Done</button>
+                    <button type="button" class="btn ghost" @onclick="() => Move(card.Project, ProjectStatus.Dropped)">Drop</button>
+                </div>
+            </article>
+        }
+    }
+</div>
+
+<StatusFlow @ref="_flow" />
+
+@code {
+    private DecideView? _view;
+    private StatusFlow _flow = default!;
+
+    protected override Task OnInitializedAsync() => Reload();
+
+    private async Task Reload()
+    {
+        try { _view = await Api.GetDecide(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Move(ProjectDto p, ProjectStatus s)
+    {
+        // Parking again from Decide always asks for a new date (revisit is in the past).
+        if (s == ProjectStatus.Parked) p.RevisitAt = null;
+        if (await _flow.ChangeStatusAsync(p, s) is not null) await Reload();
+    }
+}

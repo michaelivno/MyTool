@@ -1,0 +1,72 @@
+@* Tap to edit in place. Enter (or blur) saves, Escape cancels. Multiline uses a textarea; Ctrl/Cmd+Enter saves. *@
+@if (_editing)
+{
+    if (Multiline)
+    {
+        <textarea @ref="_textarea" class="inline-input inline-textarea @Class" dir="auto" rows="@Rows" placeholder="@Placeholder"
+                  value="@_draft" @oninput="e => _draft = e.Value?.ToString() ?? string.Empty"
+                  @onblur="Commit" @onkeydown="OnKey"></textarea>
+    }
+    else
+    {
+        <input @ref="_input" class="inline-input @Class" dir="auto" placeholder="@Placeholder" type="text"
+               value="@_draft" @oninput="e => _draft = e.Value?.ToString() ?? string.Empty"
+               @onblur="Commit" @onkeydown="OnKey" />
+    }
+}
+else
+{
+    <button type="button" class="inline-display @(string.IsNullOrWhiteSpace(Value) ? "empty" : "") @(Multiline ? "multiline" : "") @Class"
+            dir="auto" title="Tap to edit" @onclick="Begin">@(string.IsNullOrWhiteSpace(Value) ? Placeholder : Value)</button>
+}
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "—";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public bool Multiline { get; set; }
+    [Parameter] public int Rows { get; set; } = 4;
+    /// <summary>When true, an empty value is sent as null (optional fields).</summary>
+    [Parameter] public bool NullIfEmpty { get; set; } = true;
+
+    private bool _editing;
+    private bool _focusPending;
+    private string _draft = "";
+    private ElementReference _input;
+    private ElementReference _textarea;
+
+    private void Begin()
+    {
+        _draft = Value ?? "";
+        _editing = true;
+        _focusPending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPending && _editing)
+        {
+            _focusPending = false;
+            try { await (Multiline ? _textarea : _input).FocusAsync(); } catch { /* element may be gone */ }
+        }
+    }
+
+    private async Task Commit()
+    {
+        if (!_editing) return;
+        _editing = false;
+        var next = _draft.Trim();
+        var current = Value ?? "";
+        if (next == current.Trim()) return;
+        await ValueChanged.InvokeAsync(next.Length == 0 && NullIfEmpty ? null : next);
+    }
+
+    private void Cancel() => _editing = false;
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") { Cancel(); return; }
+        if (e.Key == "Enter" && (!Multiline || e.CtrlKey || e.MetaKey)) await Commit();
+    }
+}

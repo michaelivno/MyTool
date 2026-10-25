@@ -1,0 +1,109 @@
+@* One task line, fully editable in place. Saves immediately; reports the saved task back. *@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject AppState State
+@inject NavigationManager Nav
+
+<div class="task-row @(Task.Status is TaskItemStatus.Done or TaskItemStatus.Dropped ? "closed" : "") @(Task.Status == TaskItemStatus.Doing ? "doing" : "")">
+    <InlineCheckbox Value="@(Task.Status == TaskItemStatus.Done)" ValueChanged="ToggleDone" />
+    <div class="task-main">
+        <InlineText Value="@Task.Title" ValueChanged="v => Save(t => t.Title = v ?? t.Title)" NullIfEmpty="false" Class="task-title" Placeholder="Task" />
+        <div class="task-meta">
+            @if (ShowArea || (ShowProject && Task.ProjectId is not null))
+            {
+                <span class="task-context">
+                    @if (ShowArea) { <AreaChip Name="@AreaName" Color="@AreaColor" Class="tiny" /> }
+                    @if (ShowProject && !string.IsNullOrEmpty(ProjectName) && Task.ProjectId is { } pid)
+                    {
+                        <a class="project-link" href="projects/@pid" dir="auto">@ProjectName</a>
+                    }
+                </span>
+            }
+            <InlineDate Value="@Task.Due" ValueChanged="v => Save(t => t.Due = v)" Placeholder="due" Class="tiny" Title="Due date" />
+            <InlineSelect TValue="Effort" Value="@Task.Effort" ValueChanged="v => Save(t => t.Effort = v)" AllowEmpty="true" EmptyLabel="effort" Class="tiny" Title="Effort" />
+            <button type="button" class="chip-btn @(Task.Status == TaskItemStatus.Doing ? "on" : "")" title="@(Task.Status == TaskItemStatus.Doing ? "Stop doing" : "Mark as doing")" @onclick="ToggleDoing">
+                @(Task.Status == TaskItemStatus.Doing ? "● doing" : "▶ do")
+            </button>
+            @if (ShowTags || Task.Tags.Count > 0)
+            {
+                <InlineTags Value="@Task.Tags" ValueChanged="v => Save(t => t.Tags = v)" />
+            }
+        </div>
+    </div>
+    <button type="button" class="icon-btn" aria-label="Task actions" @onclick="() => _menu = true">⋯</button>
+</div>
+
+<Sheet Open="_menu" Title="@Task.Title" OnClose="() => _menu = false">
+    <div class="menu-list">
+        @foreach (var s in Enum.GetValues<TaskItemStatus>())
+        {
+            if (s == Task.Status) continue;
+            <button type="button" class="menu-item" @onclick="() => SetStatus(s)">Mark <strong>@Format.Label(s)</strong></button>
+        }
+        @if (!ShowTags && Task.Tags.Count == 0)
+        {
+            <button type="button" class="menu-item" @onclick="() => { ShowTags = true; _menu = false; }">Add tags</button>
+        }
+        @if (Task.ProjectId is { } pid)
+        {
+            <button type="button" class="menu-item" @onclick="@(() => Nav.NavigateTo($"projects/{pid}"))">Open project</button>
+        }
+        <button type="button" class="menu-item danger" @onclick="Delete">Delete task</button>
+    </div>
+</Sheet>
+
+@code {
+    [Parameter, EditorRequired] public TaskDto Task { get; set; } = new();
+    [Parameter] public EventCallback<TaskDto> OnChanged { get; set; }
+    [Parameter] public EventCallback<TaskDto> OnDeleted { get; set; }
+    [Parameter] public bool ShowArea { get; set; }
+    [Parameter] public bool ShowProject { get; set; }
+    [Parameter] public string AreaName { get; set; } = "";
+    [Parameter] public string AreaColor { get; set; } = "";
+    [Parameter] public string? ProjectName { get; set; }
+    [Parameter] public bool ShowTags { get; set; }
+
+    private bool _menu;
+
+    private Task ToggleDone(bool done) => SetStatus(done ? TaskItemStatus.Done : TaskItemStatus.Todo);
+    private Task ToggleDoing() => SetStatus(Task.Status == TaskItemStatus.Doing ? TaskItemStatus.Todo : TaskItemStatus.Doing);
+
+    private async Task SetStatus(TaskItemStatus s)
+    {
+        _menu = false;
+        await Save(t => t.Status = s);
+    }
+
+    private async Task Save(Action<TaskDto> mutate)
+    {
+        var before = System.Text.Json.JsonSerializer.Serialize(Task, CockpitJson.Options);
+        mutate(Task);
+        try
+        {
+            var saved = await Api.SaveTask(Task);
+            Task.Status = saved.Status; Task.CompletedAt = saved.CompletedAt; Task.UpdatedAt = saved.UpdatedAt;
+            Task.AreaId = saved.AreaId; Task.Tags = saved.Tags; Task.Title = saved.Title;
+            await OnChanged.InvokeAsync(Task);
+            _ = State.RefreshNavAsync();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error(ex);
+            var restored = System.Text.Json.JsonSerializer.Deserialize<TaskDto>(before, CockpitJson.Options)!;
+            Task.Title = restored.Title; Task.Status = restored.Status; Task.Due = restored.Due; Task.Effort = restored.Effort; Task.Tags = restored.Tags;
+        }
+    }
+
+    private async Task Delete()
+    {
+        _menu = false;
+        try
+        {
+            await Api.DeleteTask(Task.Id);
+            await OnDeleted.InvokeAsync(Task);
+            _ = State.RefreshNavAsync();
+            Toasts.Info("Task deleted.");
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}

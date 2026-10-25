@@ -1,0 +1,73 @@
+@inject NavigationManager Nav
+
+<article class="card project-card @(Card.Project.Status == ProjectStatus.Dropped ? "dropped" : "")" draggable="@(Draggable ? "true" : "false")"
+         @ondragstart="() => OnDragStart.InvokeAsync(Card.Project.Id)" @onclick="Open">
+    <div class="card-top">
+        <AreaChip Name="@Card.AreaName" Color="@Card.AreaColor" />
+        @if (Card.Project.Priority != Priority.Normal)
+        {
+            <span class="prio prio-@Card.Project.Priority.ToString().ToLowerInvariant()" title="Priority">@(Card.Project.Priority == Priority.High ? "▲ High" : "▽ Low")</span>
+        }
+        <button type="button" class="icon-btn card-menu" aria-label="Project actions" @onclick:stopPropagation @onclick="() => _menu = true">⋯</button>
+    </div>
+    <h3 dir="auto">@Card.Project.Name</h3>
+    @if (!string.IsNullOrWhiteSpace(Card.Project.NextMilestone))
+    {
+        <div class="muted small" dir="auto">▸ @Card.Project.NextMilestone</div>
+    }
+    <div class="card-meta">
+        @if (Card.Project.Status == ProjectStatus.Parked && Card.Project.RevisitAt is { } r)
+        {
+            <span class="chip @(r <= ApiClient.Today ? "chip-warn" : "")" title="Revisit">↻ @Format.Date(r)</span>
+        }
+        @if (Card.Project.Deadline is { } d && !Card.Project.Status.IsClosed())
+        {
+            <span class="chip @Format.DueClass(d)" title="Deadline">⏱ @Format.Date(d)</span>
+        }
+        @if (Card.Project.Status == ProjectStatus.Active && Card.OpenTaskCount == 0)
+        {
+            <span class="chip chip-warn" title="Every active project needs a next action">⚠ no next action</span>
+        }
+        else if (Card.OpenTaskCount > 0)
+        {
+            <span class="chip" title="Open tasks">☐ @Card.OpenTaskCount@(Card.OverdueTaskCount > 0 ? $" · {Card.OverdueTaskCount} overdue" : "")</span>
+        }
+        @if (Card.Project.Status == ProjectStatus.Dropped)
+        {
+            <span class="chip">dropped</span>
+        }
+    </div>
+    @if (ShowNextTask && !string.IsNullOrEmpty(Card.NextTaskTitle))
+    {
+        <div class="next-task" dir="auto">→ @Card.NextTaskTitle</div>
+    }
+</article>
+
+<Sheet Open="_menu" Title="@Card.Project.Name" OnClose="() => _menu = false">
+    <div class="menu-list">
+        <button type="button" class="menu-item" @onclick="Open">Open project</button>
+        @foreach (var s in Enum.GetValues<ProjectStatus>())
+        {
+            if (s == Card.Project.Status) continue;
+            <button type="button" class="menu-item" @onclick="() => Move(s)">Move to <strong>@Format.Label(s)</strong></button>
+        }
+    </div>
+</Sheet>
+
+@code {
+    [Parameter, EditorRequired] public ProjectCardDto Card { get; set; } = new();
+    [Parameter] public bool Draggable { get; set; }
+    [Parameter] public bool ShowNextTask { get; set; } = true;
+    [Parameter] public EventCallback<Guid> OnDragStart { get; set; }
+    [Parameter] public EventCallback<ProjectStatus> OnMove { get; set; }
+
+    private bool _menu;
+
+    private void Open() => Nav.NavigateTo($"projects/{Card.Project.Id}");
+
+    private async Task Move(ProjectStatus s)
+    {
+        _menu = false;
+        await OnMove.InvokeAsync(s);
+    }
+}

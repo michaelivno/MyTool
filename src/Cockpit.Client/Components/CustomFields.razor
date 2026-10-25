@@ -1,0 +1,71 @@
+@* Renders an area's custom FieldDefinitions for a project or task, editing the Properties JSON generically. *@
+@inject ApiClient Api
+@inject ToastService Toasts
+
+@if (_fields.Count > 0)
+{
+    <dl class="props custom">
+        @foreach (var f in _fields)
+        {
+            <dt dir="auto">@f.Name</dt>
+            <dd>
+                @switch (f.Type)
+                {
+                    case FieldType.Text:
+                        <InlineText Value="@GetString(f.Key)" ValueChanged="v => SetText(f.Key, v)" />
+                        break;
+                    case FieldType.Number:
+                        <InlineNumber Value="@GetNumber(f.Key)" ValueChanged="v => SetNumber(f.Key, v)" />
+                        break;
+                    case FieldType.Date:
+                        <InlineDate Value="@GetDate(f.Key)" ValueChanged="v => SetDate(f.Key, v)" Urgency="false" />
+                        break;
+                    case FieldType.Select:
+                        <InlineChoice Value="@GetString(f.Key)" ValueChanged="v => SetText(f.Key, v)" Options="@SelectOptions(f)" AllowEmpty="true" />
+                        break;
+                    case FieldType.Checkbox:
+                        <InlineCheckbox Value="@GetBool(f.Key)" ValueChanged="v => SetBool(f.Key, v)" />
+                        break;
+                }
+            </dd>
+        }
+    </dl>
+}
+
+@code {
+    [Parameter] public Guid AreaId { get; set; }
+    [Parameter] public FieldTarget Target { get; set; }
+    [Parameter] public JsonObject? Properties { get; set; }
+    [Parameter] public EventCallback<JsonObject?> PropertiesChanged { get; set; }
+
+    private List<FieldDefinitionDto> _fields = new();
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == AreaId) return;
+        _loadedFor = AreaId;
+        try { _fields = await Api.GetFields(AreaId, Target); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private JsonNode? Node(string key) => Properties?[key];
+    private string? GetString(string key) => Node(key) is JsonValue v ? v.ToString() : null;
+    private double? GetNumber(string key) => Node(key) is JsonValue v && v.TryGetValue<double>(out var d) ? d : null;
+    private bool GetBool(string key) => Node(key) is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+    private DateOnly? GetDate(string key) => DateOnly.TryParse(GetString(key), out var d) ? d : null;
+
+    private static IReadOnlyList<InlineChoice.Option> SelectOptions(FieldDefinitionDto f) => f.Options.Select(o => new InlineChoice.Option(o, o)).ToList();
+    private Task SetText(string key, string? v) => Set(key, v is null ? null : JsonValue.Create(v));
+    private Task SetNumber(string key, double? v) => Set(key, v is null ? null : JsonValue.Create(v.Value));
+    private Task SetDate(string key, DateOnly? v) => Set(key, v is null ? null : JsonValue.Create(v.Value.ToString("yyyy-MM-dd")));
+    private Task SetBool(string key, bool v) => Set(key, JsonValue.Create(v));
+
+    private Task Set(string key, JsonNode? value)
+    {
+        // JsonObject nodes can't be re-parented, so rebuild a fresh object from a string copy.
+        var copy = Properties is null ? new JsonObject() : JsonNode.Parse(Properties.ToJsonString())!.AsObject();
+        if (value is null) copy.Remove(key); else copy[key] = value;
+        return PropertiesChanged.InvokeAsync(copy.Count == 0 ? null : copy);
+    }
+}

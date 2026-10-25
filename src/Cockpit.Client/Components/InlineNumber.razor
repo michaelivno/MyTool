@@ -1,0 +1,17 @@
+<input type="number" class="inline-input inline-number @Class" inputmode="decimal" step="any" placeholder="@Placeholder" title="@Title"
+       value="@(Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")" @onchange="OnChange" />
+
+@code {
+    [Parameter] public double? Value { get; set; }
+    [Parameter] public EventCallback<double?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "—";
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private Task OnChange(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        double? next = double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+        return ValueChanged.InvokeAsync(next);
+    }
+}

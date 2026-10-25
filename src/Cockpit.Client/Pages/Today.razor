@@ -1,0 +1,64 @@
+@page "/"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>Today · Cockpit</PageTitle>
+
+<div class="page">
+    <header class="page-head">
+        <h1>Today <span class="muted h-sub">@DateTime.Now.ToString("ddd, d MMM")</span></h1>
+    </header>
+
+    <QuickCapture />
+
+    @if (_view is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_view.Tasks.Count == 0)
+    {
+        <EmptyState Icon="☀" Text="Nothing overdue, nothing due today, nothing in progress.">
+            <a class="btn" href="board">Open the projects board</a>
+        </EmptyState>
+    }
+    else
+    {
+        foreach (var group in _view.Tasks.GroupBy(t => t.AreaId))
+        {
+            var first = group.First();
+            <section class="group">
+                <h2 class="group-head"><AreaChip Name="@first.AreaName" Color="@first.AreaColor" /><span class="count">@group.Count()</span></h2>
+                @foreach (var row in group.OrderBy(r => BucketOrder(r.Bucket)).ThenBy(r => r.Task.Due).ThenBy(r => r.Task.SortOrder))
+                {
+                    <div class="task-with-bucket" @key="row.Task.Id">
+                        <span class="bucket bucket-@row.Bucket">@row.Bucket</span>
+                        <TaskRow Task="row.Task" ProjectName="@row.ProjectName" ShowProject="true" AreaName="@row.AreaName" AreaColor="@row.AreaColor"
+                                 OnChanged="_ => Reload()" OnDeleted="_ => Reload()" />
+                    </div>
+                }
+            </section>
+        }
+    }
+
+    @if (_view is not null)
+    {
+        <footer class="page-foot muted">
+            @if (_view.InboxCount > 0) { <a href="inbox">@_view.InboxCount in inbox</a> }
+            @if (_view.DecideCount > 0) { <a href="decide">@_view.DecideCount waiting for a decision</a> }
+        </footer>
+    }
+</div>
+
+@code {
+    private TodayView? _view;
+
+    protected override Task OnInitializedAsync() => Reload();
+
+    private async Task Reload()
+    {
+        try { _view = await Api.GetToday(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private static int BucketOrder(string b) => b switch { "overdue" => 0, "today" => 1, _ => 2 };
+}

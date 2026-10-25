@@ -1,0 +1,45 @@
+@* Tags edited as comma-separated text; displayed as chips. *@
+@if (_editing)
+{
+    <input @ref="_input" class="inline-input" dir="auto" placeholder="tag, another" value="@_draft"
+           @oninput="e => _draft = e.Value?.ToString() ?? string.Empty" @onblur="Commit" @onkeydown="OnKey" />
+}
+else
+{
+    <button type="button" class="inline-display tags @(Value.Count == 0 ? "empty" : "")" title="Tap to edit tags" @onclick="Begin">
+        @if (Value.Count == 0) { @("+ tags") }
+        @foreach (var t in Value) { <span class="tag" dir="auto">#@t</span> }
+    </button>
+}
+
+@code {
+    [Parameter] public List<string> Value { get; set; } = new();
+    [Parameter] public EventCallback<List<string>> ValueChanged { get; set; }
+
+    private bool _editing, _focus;
+    private string _draft = "";
+    private ElementReference _input;
+
+    private void Begin() { _draft = string.Join(", ", Value); _editing = true; _focus = true; }
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (_focus && _editing) { _focus = false; try { await _input.FocusAsync(); } catch { } }
+    }
+
+    private async Task Commit()
+    {
+        if (!_editing) return;
+        _editing = false;
+        var next = _draft.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => t.TrimStart('#')).Where(t => t.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (next.SequenceEqual(Value)) return;
+        await ValueChanged.InvokeAsync(next);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _editing = false;
+        else if (e.Key == "Enter") await Commit();
+    }
+}

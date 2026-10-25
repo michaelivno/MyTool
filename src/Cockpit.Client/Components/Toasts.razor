@@ -1,0 +1,23 @@
+@inject ToastService Service
+@implements IDisposable
+
+<div class="toasts" aria-live="polite">
+    @foreach (var t in Service.Toasts)
+    {
+        <div class="toast toast-@t.Kind" @key="t.Id">
+            <span dir="auto">@t.Message</span>
+            @if (t.Action is not null)
+            {
+                <button type="button" class="toast-action" @onclick="() => Run(t)">@t.ActionLabel</button>
+            }
+            <button type="button" class="toast-close" aria-label="Dismiss" @onclick="() => Service.Dismiss(t.Id)">✕</button>
+        </div>
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Service.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    private async Task Run(Toast t) { Service.Dismiss(t.Id); if (t.Action is not null) await t.Action(); }
+    public void Dispose() => Service.Changed -= OnChanged;
+}

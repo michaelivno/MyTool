@@ -1,0 +1,69 @@
+@page "/week"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>Week · Cockpit</PageTitle>
+
+<div class="page">
+    <header class="page-head"><h1>This week <span class="muted h-sub">@(_view is null ? "" : $"{Format.Date(_view.From)} – {_view.To:d MMM}")</span></h1></header>
+
+    @if (_view is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else
+    {
+        <section class="group">
+            <h2 class="group-head">Due this week <span class="count">@_view.Tasks.Count</span></h2>
+            @if (_view.Tasks.Count == 0)
+            {
+                <EmptyState Icon="▦" Text="No dated tasks in the next 7 days." />
+            }
+            @foreach (var day in _view.Tasks.GroupBy(t => t.Task.Due!.Value).OrderBy(g => g.Key))
+            {
+                <h3 class="day-head @Format.DueClass(day.Key)">@DayLabel(day.Key) <span class="muted small">@day.Key.ToString("d MMM")</span></h3>
+                @foreach (var row in day)
+                {
+                    <TaskRow @key="row.Task.Id" Task="row.Task" ShowArea="true" ShowProject="true" ProjectName="@row.ProjectName" AreaName="@row.AreaName" AreaColor="@row.AreaColor"
+                             OnChanged="_ => Reload()" OnDeleted="_ => Reload()" />
+                }
+            }
+        </section>
+
+        <section class="group">
+            <h2 class="group-head">Active projects <span class="count">@_view.ActiveProjects.Count</span></h2>
+            <div class="card-grid">
+                @foreach (var card in _view.ActiveProjects)
+                {
+                    <ProjectCard @key="card.Project.Id" Card="card" OnMove="s => Move(card.Project, s)" />
+                }
+            </div>
+        </section>
+    }
+</div>
+
+<StatusFlow @ref="_flow" />
+
+@code {
+    private WeekView? _view;
+    private StatusFlow _flow = default!;
+
+    protected override Task OnInitializedAsync() => Reload();
+
+    private async Task Reload()
+    {
+        try { _view = await Api.GetWeek(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Move(ProjectDto p, ProjectStatus s)
+    {
+        if (await _flow.ChangeStatusAsync(p, s) is not null) await Reload();
+    }
+
+    private static string DayLabel(DateOnly d)
+    {
+        var diff = d.DayNumber - ApiClient.Today.DayNumber;
+        return diff < 0 ? "Overdue" : diff == 0 ? "Today" : diff == 1 ? "Tomorrow" : d.ToString("dddd");
+    }
+}

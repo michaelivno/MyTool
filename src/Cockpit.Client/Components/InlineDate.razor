@@ -1,0 +1,30 @@
+@* Native date input styled as a chip; shows a friendly label when set and an × to clear. *@
+<span class="inline-date-wrap @Class @(Value is null ? "empty" : Format.DueClass(Value, Urgency))">
+    <span class="inline-date-label" aria-hidden="true">@(Value is null ? Placeholder : $"{Prefix}{Format.Date(Value)}")</span>
+    <input type="date" class="inline-date" value="@(Value?.ToString("yyyy-MM-dd") ?? "")" title="@Title" aria-label="@(Title ?? Placeholder)"
+           @onchange="OnChange" disabled="@Disabled" />
+    @if (Value is not null && !Disabled && Clearable)
+    {
+        <button type="button" class="inline-clear" aria-label="Clear date" @onclick="() => ValueChanged.InvokeAsync(null)">✕</button>
+    }
+</span>
+
+@code {
+    [Parameter] public DateOnly? Value { get; set; }
+    [Parameter] public EventCallback<DateOnly?> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Set date";
+    [Parameter] public string? Prefix { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Clearable { get; set; } = true;
+    /// <summary>Color the chip by urgency (overdue / today / soon).</summary>
+    [Parameter] public bool Urgency { get; set; } = true;
+
+    private Task OnChange(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        DateOnly? next = DateOnly.TryParse(raw, out var d) ? d : null;
+        return ValueChanged.InvokeAsync(next);
+    }
+}

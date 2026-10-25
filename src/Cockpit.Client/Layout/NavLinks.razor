@@ -1,0 +1,16 @@
+<nav class="side-nav">
+    <NavLink href="" Match="NavLinkMatch.All" class="side-item"><span class="bn-icon">☀</span>Today @B(Counts.Today)</NavLink>
+    <NavLink href="week" class="side-item"><span class="bn-icon">▦</span>Week</NavLink>
+    <NavLink href="board" class="side-item"><span class="bn-icon">▤</span>Projects <span class="wip-mini @(Counts.ActiveProjects >= Counts.WipLimit ? "full" : "")">@Counts.ActiveProjects/@Counts.WipLimit</span></NavLink>
+    <NavLink href="decide" class="side-item"><span class="bn-icon">⚖</span>Decide @B(Counts.Decide)</NavLink>
+    <NavLink href="areas" class="side-item"><span class="bn-icon">◫</span>Areas</NavLink>
+    <NavLink href="inbox" class="side-item"><span class="bn-icon">⌲</span>Inbox @B(Counts.Inbox)</NavLink>
+    <NavLink href="review" class="side-item"><span class="bn-icon">↻</span>Weekly review</NavLink>
+    <NavLink href="settings" class="side-item"><span class="bn-icon">⚙</span>Settings</NavLink>
+</nav>
+
+@code {
+    [Parameter] public NavCounts Counts { get; set; } = new();
+
+    private static RenderFragment? B(int n) => n <= 0 ? null : b => { b.OpenElement(0, "span"); b.AddAttribute(1, "class", "badge"); b.AddContent(2, n > 99 ? "99+" : n.ToString()); b.CloseElement(); };
+}

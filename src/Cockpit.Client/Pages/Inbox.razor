@@ -1,0 +1,195 @@
+@page "/inbox"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Inbox · Cockpit</PageTitle>
+
+<div class="page">
+    <header class="page-head">
+        <h1>Inbox <span class="muted h-sub">@_items.Count(i => i.ProcessedAt is null)</span></h1>
+        <button type="button" class="link small" @onclick="ToggleProcessed">@(_showProcessed ? "hide processed" : "show processed")</button>
+    </header>
+
+    <QuickCapture OnCaptured="i => { _items.Insert(0, i); return Task.CompletedTask; }" Placeholder="Capture…" />
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (!_items.Any(i => _showProcessed || i.ProcessedAt is null))
+    {
+        <EmptyState Icon="⌲" Text="Inbox zero. Nice." />
+    }
+
+    @foreach (var item in _items.Where(i => _showProcessed || i.ProcessedAt is null).OrderBy(i => i.ProcessedAt is not null).ThenBy(i => i.CreatedAt))
+    {
+        <article class="card inbox-item @(item.ProcessedAt is not null ? "processed" : "") @(IsStale(item) ? "stale" : "")" @key="item.Id">
+            <InlineText Value="@item.Text" ValueChanged="v => SaveText(item, v)" NullIfEmpty="false" Class="inbox-text" />
+            <div class="inbox-meta muted small">
+                captured @Format.Ago(item.CreatedAt)
+                @if (IsStale(item)) { <span class="chip chip-warn">older than @State.Settings.InboxStaleDays days</span> }
+                @if (item.ConvertedTo is { } c)
+                {
+                    <span class="chip">→ @Format.Label(c)</span>
+                    @if (c == InboxConversion.Project && item.ConvertedId is { } pid) { <a href="projects/@pid">open</a> }
+                    @if (c == InboxConversion.Note && item.ConvertedId is { } npid) { <a href="projects/@npid">open project</a> }
+                }
+            </div>
+            @if (item.ProcessedAt is null)
+            {
+                <div class="inbox-actions">
+                    <button type="button" class="btn small" @onclick="() => Start(item, InboxConversion.Task)">→ Task</button>
+                    <button type="button" class="btn small" @onclick="() => Start(item, InboxConversion.Project)">→ Project</button>
+                    <button type="button" class="btn small" @onclick="() => Start(item, InboxConversion.Note)">→ Note</button>
+                    <button type="button" class="btn small ghost" @onclick="() => Process(item, new ProcessInboxRequest { ConvertTo = InboxConversion.Discarded })">Discard</button>
+                </div>
+            }
+            else
+            {
+                <div class="inbox-actions">
+                    <button type="button" class="btn small ghost" @onclick="() => Reopen(item)">Back to inbox</button>
+                </div>
+            }
+        </article>
+    }
+</div>
+
+<Sheet Open="_current is not null" Title="@SheetTitle" OnClose="() => _current = null">
+    @if (_current is not null)
+    {
+        <p class="inbox-quote" dir="auto">“@_current.Text”</p>
+        <label class="field-label">Title</label>
+        <input class="input" dir="auto" value="@_req.Title" @oninput="e => _req.Title = e.Value?.ToString()" />
+
+        @if (_req.ConvertTo == InboxConversion.Project)
+        {
+            <label class="field-label">Area</label>
+            <InlineChoice Value="@(_req.AreaId?.ToString())" ValueChanged="v => _req.AreaId = Guid.TryParse(v, out var g) ? g : null" Options="AreaOptions" AllowEmpty="true" EmptyLabel="Pick an area" Class="wide" />
+            <label class="field-label">Revisit on (new projects start parked)</label>
+            <input type="date" class="input" value="@(_req.Due?.ToString("yyyy-MM-dd"))" @onchange="e => _req.Due = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null" />
+        }
+        else
+        {
+            <label class="field-label">@(_req.ConvertTo == InboxConversion.Note ? "Project" : "Project or area")</label>
+            <InlineChoice Value="@TargetValue" ValueChanged="SetTarget" Options="TargetOptions" AllowEmpty="true" EmptyLabel="Pick…" Class="wide" />
+            @if (_req.ConvertTo == InboxConversion.Task)
+            {
+                <label class="field-label">Due (optional)</label>
+                <input type="date" class="input" value="@(_req.Due?.ToString("yyyy-MM-dd"))" @onchange="e => _req.Due = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : null" />
+            }
+        }
+
+        <div class="sheet-actions">
+            <button type="button" class="btn" @onclick="() => _current = null">Cancel</button>
+            <button type="button" class="btn primary" disabled="@(!CanSubmit)" @onclick="() => Process(_current, _req)">@SubmitLabel</button>
+        </div>
+    }
+</Sheet>
+
+@code {
+    private List<InboxItemDto> _items = new();
+    private List<ProjectDto> _projects = new();
+    private bool _loading = true;
+    private bool _showProcessed;
+    private InboxItemDto? _current;
+    private ProcessInboxRequest _req = new();
+
+    private IReadOnlyList<InlineChoice.Option> AreaOptions => State.Areas.Select(a => new InlineChoice.Option(a.Id.ToString(), a.Name)).ToList();
+
+    private IReadOnlyList<InlineChoice.Option> TargetOptions
+    {
+        get
+        {
+            var list = new List<InlineChoice.Option>();
+            foreach (var a in State.Areas)
+            {
+                if (_req.ConvertTo == InboxConversion.Task) list.Add(new($"area:{a.Id}", $"{a.Name} (no project)", a.Name));
+                foreach (var p in _projects.Where(p => p.AreaId == a.Id && !p.Status.IsClosed()).OrderBy(p => p.Status).ThenBy(p => p.Name))
+                    list.Add(new($"project:{p.Id}", $"{p.Name}{(p.Status == ProjectStatus.Parked ? " (parked)" : "")}", a.Name));
+            }
+            return list;
+        }
+    }
+
+    private string? TargetValue => _req.ProjectId is { } p ? $"project:{p}" : _req.AreaId is { } a ? $"area:{a}" : null;
+
+    private void SetTarget(string? v)
+    {
+        _req.ProjectId = null; _req.AreaId = null;
+        if (v is null) return;
+        var parts = v.Split(':');
+        if (parts[0] == "project") _req.ProjectId = Guid.Parse(parts[1]); else _req.AreaId = Guid.Parse(parts[1]);
+    }
+
+    private string SheetTitle => _req.ConvertTo switch { InboxConversion.Task => "New task", InboxConversion.Project => "New project", _ => "Add note to project" };
+    private string SubmitLabel => _req.ConvertTo switch { InboxConversion.Task => "Create task", InboxConversion.Project => "Create project", _ => "Add note" };
+    private bool CanSubmit => _req.ConvertTo switch
+    {
+        InboxConversion.Project => _req.AreaId is not null && _req.Due is not null,
+        InboxConversion.Note => _req.ProjectId is not null,
+        _ => _req.ProjectId is not null || _req.AreaId is not null,
+    };
+
+    private bool IsStale(InboxItemDto i) => i.ProcessedAt is null && (DateTime.UtcNow - i.CreatedAt).TotalDays > State.Settings.InboxStaleDays;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _items = await Api.GetInbox(includeProcessed: true);
+            _projects = await Api.GetProjects();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+        _loading = false;
+    }
+
+    private void ToggleProcessed() => _showProcessed = !_showProcessed;
+
+    private void Start(InboxItemDto item, InboxConversion kind)
+    {
+        _current = item;
+        _req = new ProcessInboxRequest { ConvertTo = kind, Title = item.Text, Due = kind == InboxConversion.Project ? ApiClient.Today.AddDays(30) : null };
+    }
+
+    private async Task Process(InboxItemDto item, ProcessInboxRequest req)
+    {
+        try
+        {
+            var result = await Api.ProcessInbox(item.Id, req);
+            var idx = _items.FindIndex(i => i.Id == item.Id);
+            if (idx >= 0) _items[idx] = result.Item;
+            _current = null;
+            _ = State.RefreshNavAsync();
+            var what = req.ConvertTo switch { InboxConversion.Task => "Task created.", InboxConversion.Project => "Project created (parked).", InboxConversion.Note => "Note added.", _ => "Discarded." };
+            Toasts.Success(what, "Undo", () => Reopen(result.Item));
+            if (req.ConvertTo == InboxConversion.Project) _projects = await Api.GetProjects();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Reopen(InboxItemDto item)
+    {
+        try
+        {
+            var reopened = await Api.ReopenInbox(item.Id);
+            var idx = _items.FindIndex(i => i.Id == item.Id);
+            if (idx >= 0) _items[idx] = reopened;
+            _ = State.RefreshNavAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task SaveText(InboxItemDto item, string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        try
+        {
+            item.Text = text;
+            await Api.SaveInboxText(item);
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}

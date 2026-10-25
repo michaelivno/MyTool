@@ -1,0 +1,70 @@
+@page "/areas"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>Areas · Cockpit</PageTitle>
+
+<div class="page page-wide">
+    <header class="page-head">
+        <h1>Areas</h1>
+        @if (_view is not null)
+        {
+            <div class="head-actions">
+                <span class="wip @(_view.ActiveCount >= _view.WipLimit ? "full" : "")">@_view.ActiveCount/@_view.WipLimit active</span>
+                @if (_view.StaleInboxCount > 0) { <a class="chip chip-warn" href="inbox">@_view.StaleInboxCount stale in inbox</a> }
+            </div>
+        }
+    </header>
+
+    @if (_view is null)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_view.Areas.Count == 0)
+    {
+        <EmptyState Icon="◫" Text="No areas yet."><a class="btn" href="settings">Add areas in Settings</a></EmptyState>
+    }
+    else
+    {
+        <div class="card-grid">
+            @foreach (var a in _view.Areas)
+            {
+                <a class="card area-card" href="areas/@a.Area.Id" style="--area:@a.Area.Color" @key="a.Area.Id">
+                    <div class="card-top">
+                        <AreaChip Name="@a.Area.Name" Color="@a.Area.Color" Class="big" />
+                        <span class="muted small">@Format.Label(a.Area.Kind)</span>
+                    </div>
+                    <div class="stats">
+                        <div><strong>@a.ActiveProjects</strong><span>active</span></div>
+                        <div><strong>@a.ParkedProjects</strong><span>parked</span></div>
+                        <div><strong>@a.OpenTasks</strong><span>open tasks</span></div>
+                    </div>
+                    <div class="card-meta">
+                        @if (a.LastTouched is { } lt) { <span class="chip" title="Last touched">⟳ @Format.Ago(lt)</span> }
+                        @if (a.NearestDeadline is { } nd) { <span class="chip @Format.DueClass(nd)" title="@a.NearestDeadlineProject">⏱ @Format.Date(nd)</span> }
+                    </div>
+                    @if (a.Flags.Count > 0)
+                    {
+                        <ul class="flags">
+                            @foreach (var f in a.Flags) { <li class="flag flag-@f.Code" dir="auto">@f.Message</li> }
+                        </ul>
+                    }
+                    else
+                    {
+                        <div class="ok-line">✓ healthy</div>
+                    }
+                </a>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private AreasOverview? _view;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _view = await Api.GetAreasOverview(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}
