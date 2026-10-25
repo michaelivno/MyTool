@@ -27,6 +27,7 @@ builder.Services.AddScoped<FieldDefinitionService>();
 builder.Services.AddScoped<ViewsService>();
 builder.Services.AddScoped<ExportService>();
 builder.Services.AddScoped<ReviewService>();
+builder.Services.AddScoped<MarkdownExportService>();
 builder.Services.AddScoped<Seeder>();
 builder.Services.ConfigureHttpJsonOptions(o => CockpitJson.Configure(o.SerializerOptions));
 

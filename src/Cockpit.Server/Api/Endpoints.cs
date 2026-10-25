@@ -87,6 +87,8 @@ public static class Endpoints
             return Results.File(ExportService.Serialize(doc), "application/json", name);
         });
         api.MapGet("/export/document", async (ExportService s, CancellationToken ct) => Results.Ok(await s.ExportAsync(ct)));
+        api.MapGet("/export/markdown", async (MarkdownExportService s, IClock clock, CancellationToken ct) =>
+            Results.File(await s.BuildZipAsync(ct), "application/zip", $"cockpit-vault-{clock.UtcNow:yyyyMMdd-HHmm}.zip"));
         api.MapPost("/import/json", async (ExportDocument doc, string? mode, ExportService s, CancellationToken ct)
             => TryEnum<ImportMode>(mode, out var m) ? Send(await s.ImportAsync(doc, m ?? ImportMode.Merge, ct)) : BadQuery("mode"));
 

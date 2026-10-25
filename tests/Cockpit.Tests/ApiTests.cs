@@ -94,6 +94,21 @@ public sealed class ApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Markdown_export_is_a_zip_download()
+    {
+        var area = await PostAsync<AreaDto>("/api/areas", new AreaDto { Name = "Home", Kind = AreaKind.Home });
+        await PostAsync<ProjectDto>("/api/projects", new ProjectDto { AreaId = area.Id, Name = "Deck", Status = ProjectStatus.Active });
+
+        var res = await _client.GetAsync("/api/export/markdown");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("application/zip", res.Content.Headers.ContentType!.MediaType);
+        Assert.EndsWith(".zip", res.Content.Headers.ContentDisposition!.FileName!.Trim('"'));
+        using var zip = new System.IO.Compression.ZipArchive(await res.Content.ReadAsStreamAsync());
+        Assert.Contains(zip.Entries, e => e.FullName == "Projects/Home/Deck.md");
+    }
+
+    [Fact]
     public async Task Spa_fallback_serves_index_html_for_client_routes()
     {
         var res = await _client.GetAsync("/board");
