@@ -3,6 +3,7 @@
 @inject AppState State
 @inject ToastService Toasts
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>Settings · Cockpit</PageTitle>
 
@@ -41,6 +42,19 @@
     </section>
 
     <section class="group">
+        <h2 class="group-head">Backups</h2>
+        <p class="muted small">The app copies the SQLite file once a day with SQLite's online backup (safe while running) into <code>@(_backups?.Directory ?? "…")</code>, and keeps the newest ones.</p>
+        <dl class="props">
+            <dt>Daily at</dt>
+            <dd><input type="number" class="input narrow" min="0" max="23" value="@_settings.BackupHour" @onchange="e => SaveSettings(s => s.BackupHour = int.TryParse(e.Value?.ToString(), out var n) ? n : s.BackupHour)" /> <span class="muted small">o'clock, server time</span></dd>
+            <dt>Keep for</dt>
+            <dd><input type="number" class="input narrow" min="1" max="3650" value="@_settings.BackupRetentionDays" @onchange="e => SaveSettings(s => s.BackupRetentionDays = int.TryParse(e.Value?.ToString(), out var n) ? n : s.BackupRetentionDays)" /> <span class="muted small">days (the newest three are always kept)</span></dd>
+            <dt>Last backup</dt>
+            <dd>@(_backups?.LastRunUtc is { } last ? $"{Format.Ago(last)} · {_backups.Backups.Count} file(s)" : "none yet") <button type="button" class="btn small" disabled="@_backingUp" @onclick="RunBackup">Back up now</button></dd>
+        </dl>
+    </section>
+
+    <section class="group">
         <h2 class="group-head">Your data</h2>
         <p class="muted small">Everything lives in one SQLite file on your server. Export is lossless (ids, timestamps and deleted items included) and can be re-imported here.</p>
         <div class="btn-row">
@@ -60,6 +74,14 @@
             }
         </div>
     </section>
+
+    @if (_auth?.Required == true)
+    {
+        <section class="group">
+            <h2 class="group-head">Session</h2>
+            <button type="button" class="btn" @onclick="SignOut">Sign out on this device</button>
+        </section>
+    }
 </div>
 
 @code {
@@ -70,6 +92,9 @@
     private AreaKind _newKind = AreaKind.Other;
     private ImportMode _importMode = ImportMode.Merge;
     private ImportResult? _importResult;
+    private BackupStatusDto? _backups;
+    private AuthStatusDto? _auth;
+    private bool _backingUp;
 
     protected override async Task OnInitializedAsync()
     {
@@ -77,7 +102,23 @@
         {
             _settings = await Api.GetSettings();
             _areas = await Api.GetAreas(includeArchived: true);
+            _backups = await Api.GetBackups();
+            _auth = await Api.GetAuthStatus();
         }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task RunBackup()
+    {
+        _backingUp = true;
+        try { var b = await Api.RunBackup(); _backups = await Api.GetBackups(); Toasts.Success($"Backup written: {b.FileName}"); }
+        catch (Exception ex) { Toasts.Error(ex); }
+        _backingUp = false;
+    }
+
+    private async Task SignOut()
+    {
+        try { await Api.Logout(); Nav.NavigateTo("", forceLoad: true); }
         catch (Exception ex) { Toasts.Error(ex); }
     }
 

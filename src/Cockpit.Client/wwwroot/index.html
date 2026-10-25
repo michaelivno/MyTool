@@ -16,13 +16,11 @@
         // Apply the saved theme before first paint to avoid a flash.
         (function () { try { var t = localStorage.getItem('cockpit.theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) { } })();
     </script>
-    <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
     <link href="manifest.webmanifest" rel="manifest" />
     <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
-    <script type="importmap"></script>
 </head>
 
 <body>
@@ -40,7 +38,7 @@
         <span class="dismiss">✕</span>
     </div>
     <script src="app.js"></script>
-    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
     <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
 </body>
 

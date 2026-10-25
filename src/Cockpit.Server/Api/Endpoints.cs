@@ -7,11 +7,17 @@ namespace Cockpit.Server.Api;
 
 public static class Endpoints
 {
-    public static IEndpointRouteBuilder MapCockpitApi(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapCockpitApi(this IEndpointRouteBuilder app, bool requireAuth)
     {
         var api = app.MapGroup("/api");
+        if (requireAuth) api.RequireAuthorization();
 
-        api.MapGet("/health", () => Results.Ok(new { status = "ok", app = "cockpit" }));
+        api.MapGet("/health", () => Results.Ok(new { status = "ok", app = "cockpit" })).AllowAnonymous();
+        api.MapAuth();
+
+        // ---- Backups (daily, in-app; see BackupService) ----
+        api.MapGet("/backups", (BackupService s) => Results.Ok(s.Status()));
+        api.MapPost("/backups/run", async (BackupService s, CancellationToken ct) => Results.Json(await s.BackupNowAsync(ct), statusCode: 201));
 
         // ---- Settings ----
         api.MapGet("/settings", async (SettingsService s, CancellationToken ct) => Results.Ok(await s.GetAsync(ct)));

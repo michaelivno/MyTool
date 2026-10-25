@@ -1,0 +1,28 @@
+@inject ApiClient Api
+
+<div class="login-screen">
+    <form class="card login-card" @onsubmit="Submit" @onsubmit:preventDefault>
+        <div class="brand"><span class="brand-mark">◎</span> Cockpit</div>
+        <p class="muted small">This instance asks for a password.</p>
+        <input class="input" type="password" placeholder="Password" autocomplete="current-password" value="@_password" @oninput="e => _password = e.Value?.ToString() ?? string.Empty" autofocus />
+        @if (_error is not null) { <p class="warn-line">@_error</p> }
+        <button type="submit" class="btn primary" disabled="@(_busy || _password.Length == 0)">Unlock</button>
+    </form>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnLoggedIn { get; set; }
+    private string _password = "";
+    private string? _error;
+    private bool _busy;
+
+    private async Task Submit()
+    {
+        _busy = true; _error = null;
+        try { await Api.Login(_password); _password = ""; await OnLoggedIn.InvokeAsync(); }
+        catch (ApiException ex) when (ex.Status == System.Net.HttpStatusCode.TooManyRequests) { _error = "Too many attempts. Wait a minute."; }
+        catch (ApiException ex) { _error = ex.Error.Message; }
+        catch (Exception) { _error = "Can't reach the server."; }
+        _busy = false;
+    }
+}

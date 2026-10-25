@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.git/
+.gitignore
+data/
+**/data/
+tests/
+docs/
+*.md
+.config/
+.claude/

@@ -5,7 +5,7 @@ using Cockpit.Shared;
 namespace Cockpit.Client.Services;
 
 /// <summary>Typed wrapper over the Cockpit API. Throws ApiException with the server's ApiError on failure.</summary>
-public sealed class ApiClient(HttpClient http)
+public sealed class ApiClient(HttpClient http, AuthSignal auth)
 {
     private static readonly JsonSerializerOptions Json = CockpitJson.Options;
 
@@ -79,6 +79,17 @@ public sealed class ApiClient(HttpClient http)
     public Task<ReviewDto> FinishReview(Guid id, string? notes) => Post<ReviewDto>($"api/reviews/{id}/finish?{T}", new ReviewFinishRequest { Notes = notes });
     public Task<ReviewDto> AbandonReview(Guid id) => Post<ReviewDto>($"api/reviews/{id}/abandon", new { });
 
+    // ---- auth / backups ----
+    public Task<AuthStatusDto> GetAuthStatus() => Get<AuthStatusDto>("api/auth/status");
+    public async Task Login(string password)
+    {
+        using var res = await http.PostAsJsonAsync("api/auth/login", new LoginRequest { Password = password }, Json);
+        await EnsureOk(res);
+    }
+    public Task Logout() => PostNoContent("api/auth/logout", new { });
+    public Task<BackupStatusDto> GetBackups() => Get<BackupStatusDto>("api/backups");
+    public Task<BackupFileDto> RunBackup() => Post<BackupFileDto>("api/backups/run", new { });
+
     // ---- export / import ----
     public Task<ImportResult> Import(ExportDocument doc, ImportMode mode) => Post<ImportResult>($"api/import/json?mode={mode}", doc);
 
@@ -113,15 +124,17 @@ public sealed class ApiClient(HttpClient http)
         await EnsureOk(res);
     }
 
-    private static async Task<T> Read<T>(HttpResponseMessage res)
+    private async Task<T> Read<T>(HttpResponseMessage res)
     {
         await EnsureOk(res);
         return (await res.Content.ReadFromJsonAsync<T>(Json))!;
     }
 
-    private static async Task EnsureOk(HttpResponseMessage res)
+    private async Task EnsureOk(HttpResponseMessage res)
     {
         if (res.IsSuccessStatusCode) return;
+        if (res.StatusCode == System.Net.HttpStatusCode.Unauthorized && !(res.RequestMessage?.RequestUri?.AbsolutePath.Contains("/api/auth/") ?? false))
+            auth.RaiseLocked();
         ApiError? error = null;
         try { error = await res.Content.ReadFromJsonAsync<ApiError>(Json); } catch { /* not our JSON */ }
         error ??= new ApiError { Code = ((int)res.StatusCode).ToString(), Message = $"Request failed ({(int)res.StatusCode} {res.ReasonPhrase})." };

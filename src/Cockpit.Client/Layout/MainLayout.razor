@@ -1,8 +1,17 @@
 @inherits LayoutComponentBase
 @inject AppState State
 @inject ToastService Toasts
+@inject ApiClient Api
+@inject AuthSignal Auth
 @inject IJSRuntime JS
 @implements IDisposable
+
+@if (_locked)
+{
+    <Login OnLoggedIn="Unlocked" />
+    <Toasts />
+    return;
+}
 
 <div class="shell">
     <aside class="sidebar">
@@ -53,20 +62,37 @@
 
 @code {
     private bool _more;
+    private bool _locked;
     private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
         State.Changed += OnChanged;
         Toasts.Changed += OnChanged;
+        Auth.Locked += OnLocked;
         await Load();
     }
 
     private async Task Load()
     {
         _error = null;
-        try { await State.RefreshAsync(); }
+        try
+        {
+            var status = await Api.GetAuthStatus();
+            if (status.Required && !status.Authenticated) { _locked = true; return; }
+            await State.RefreshAsync();
+        }
+        catch (ApiException ex) when (ex.Status == System.Net.HttpStatusCode.Unauthorized) { _locked = true; }
         catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void OnLocked() { _locked = true; InvokeAsync(StateHasChanged); }
+
+    private async Task Unlocked()
+    {
+        _locked = false;
+        await Load();
+        StateHasChanged();
     }
 
     private void OnChanged() => InvokeAsync(StateHasChanged);
@@ -79,5 +105,6 @@
     {
         State.Changed -= OnChanged;
         Toasts.Changed -= OnChanged;
+        Auth.Locked -= OnLocked;
     }
 }

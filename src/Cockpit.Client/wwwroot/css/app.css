@@ -320,3 +320,9 @@ input, select, textarea { font: inherit; color: inherit; }
 .summary { margin: 4px 0 10px; padding-inline-start: 18px; } .summary li { margin: 2px 0; }
 .notes-input { min-height: 120px; resize: vertical; }
 .pick-item input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+
+/* login */
+.login-screen { min-height: 100dvh; display: grid; place-items: center; padding: 20px; }
+.login-card { width: min(380px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.login-card .brand { padding: 0; justify-content: center; font-size: 1.4rem; }
+code { font-size: .85em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }

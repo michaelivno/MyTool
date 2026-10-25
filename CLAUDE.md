@@ -23,7 +23,8 @@ docs/                PLAN.md (decisions, schema, API, milestones, open questions
 ## Run / test
 - `dotnet run --project src/Cockpit.Server` → http://localhost:5080 (also reachable from the phone on the LAN via the PC's IP). Add `-- --seed` once to load the starter areas/projects. DB: `COCKPIT_DB` (default `src/Cockpit.Server/data/cockpit.db`, git-ignored).
 - `dotnet watch --project src/Cockpit.Server` for hot reload.
-- `dotnet test` (≈40 tests, ~5 s). Run it before every commit.
+- `dotnet test` (≈95 tests, ~5 s). Run it before every commit.
+- `dotnet publish src/Cockpit.Server -c Release -o /tmp/cockpit-pub` and run `dotnet Cockpit.Server.dll` from there to check the Production build (that is what the Dockerfile ships). `docker compose up -d --build` to deploy.
 - Schema change: `dotnet ef migrations add <Name> --project src/Cockpit.Server --output-dir Data/Migrations`, then commit the migration.
 - UI smoke: Playwright + Chromium are available in the cloud container; a script lives in the session scratchpad, not in the repo.
 
@@ -36,6 +37,9 @@ docs/                PLAN.md (decisions, schema, API, milestones, open questions
 - The task enum is `TaskItemStatus` (not `TaskStatus`, which clashes with `System.Threading.Tasks`).
 - Client: pages own their DTOs and call `ApiClient`; status changes go through `StatusFlow.ChangeStatusAsync` so the WIP/revisit prompts are consistent everywhere. After a mutation call `State.RefreshNavAsync()` for badge counts.
 - CSS is one hand-written file (`wwwroot/css/app.css`) with theme tokens; no scoped `.razor.css`.
+- Hosting: the server serves the client with `MapStaticAssets()` and `index.html` references the plain `_framework/blazor.webassembly.js` (`OverrideHtmlAssetPlaceholders` is off). Do not reintroduce `#[.{fingerprint}]` placeholders or `UseStaticFiles` for the client: the published app would not boot.
+- Backups: `Services/BackupService.cs` (hosted service, SQLite online backup, settings `backup_hour` / `backup_retention_days`). Auth: `Api/AuthEndpoints.cs`, enabled only when `COCKPIT_PASSWORD` is set; the client shows `Components/Login.razor` on 401.
+- Config comes from environment variables read through `builder.Configuration`: `COCKPIT_DB`, `COCKPIT_BACKUP_DIR`, `COCKPIT_PASSWORD`, `COCKPIT_SEED_ON_EMPTY`.
 - Commits: small, one concern, imperative subject. One milestone per PR when possible.
 
 ## Scope creep

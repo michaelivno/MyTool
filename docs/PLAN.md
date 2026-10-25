@@ -97,12 +97,12 @@ Each is one evening. The app is usable on the phone after milestone 1.
 
 | # | Scope | State |
 |---|---|---|
-| 1 | Solution, schema + migration, API, rules, JSON export/import, seed, Board + Project + Tasks + Inbox + Settings UI, PWA shell, tests for WIP / parked / round trip | done (this PR, also includes first versions of Today, Week, Decide, Areas) |
-| 2 | Today + Week polish, capture, inline-edit refinements, PWA icons/manifest, dark mode, RTL | done with 1 (small extra effort) |
-| 3 | Areas health + area page, Decide, FieldDefinitions UI and generic custom-field rendering | next |
-| 4 | Weekly review wizard + Review record + state-machine tests | |
-| 5 | Markdown (Obsidian) export, import UX, settings completion | |
-| 6 | Dockerfile + Compose, in-app daily SQLite backup, optional password gate, README/CLAUDE.md | |
+| 1 | Solution, schema + migration, API, rules, JSON export/import, seed, Board + Project + Tasks + Inbox + Settings UI, PWA shell, tests for WIP / parked / round trip | done (commit M1; also first versions of Today, Week, Decide, Areas) |
+| 2 | Today + Week polish, capture, inline-edit refinements, PWA icons/manifest, dark mode, RTL | done inside M1 |
+| 3 | Areas health + area page, Decide, FieldDefinitions UI and generic custom-field rendering | done (commit M3) |
+| 4 | Weekly review wizard + Review record + state-machine tests | done (commit M4) |
+| 5 | Markdown (Obsidian) export, import UX, settings completion | done (commit M5) |
+| 6 | Dockerfile + Compose, in-app daily SQLite backup, optional password gate, README/CLAUDE.md | done (commit M6) |
 
 ## 6. Test plan → rules
 
@@ -113,7 +113,9 @@ Each is one evening. The app is usable on the phone after milestone 1.
 | Every active project needs a next action | `HealthRuleTests.Active_project_with_no_open_task_is_flagged…` |
 | Inbox hygiene (7-day soft warning) | `HealthRuleTests.Stale_inbox_counts…` |
 | Export → import round trip (lossless, deleted rows included, merge upserts, bad files rejected atomically) | `ExportRoundTripTests`, `ApiTests.Export_is_a_json_download…` |
-| Review wizard state machine | milestone 4 |
+| Review wizard state machine (forward one / back any, finish only at the end and within WIP, one in-progress review, known decisions, snapshots) | `ReviewWizardTests` |
+| Backups (consistent single-file copy, prune keeps newest three, once per day after the hour) | `BackupTests` |
+| Password gate (401 until login, cookie, logout, rate limit, open when unset, app shell public) | `AuthTests`, `NoPasswordTests` |
 
 Tests use the real services on an in-memory SQLite database that runs the checked-in migrations; `ApiTests` boot the real host with `WebApplicationFactory`. Run: `dotnet test`.
 
@@ -122,8 +124,9 @@ Tests use the real services on an in-memory SQLite database that runs the checke
 - Run locally: `dotnet run --project src/Cockpit.Server` → http://localhost:5080 (binds `0.0.0.0`, so the phone on the same Wi-Fi can open `http://<pc-ip>:5080`). First time: `dotnet run --project src/Cockpit.Server -- --seed`.
 - Hot reload: `dotnet watch --project src/Cockpit.Server`.
 - Tests: `dotnet test`.
-- Deploy (milestone 6): `docker compose up -d --build`; one container, `./data` mounted at `/data`, `COCKPIT_DB=/data/cockpit.db`, `COCKPIT_SEED_ON_EMPTY=true` for the first start. Access over Tailscale by default; `COCKPIT_PASSWORD` enables a single-user login for public exposure behind HTTPS.
-- Backup (milestone 6): the app itself runs SQLite's online backup API daily (`backup_hour`, keeps `backup_retention_days` copies under `/data/backups`) — safe with WAL, no second container. Plus `Export JSON` at any time from Settings.
+- Deploy: `docker compose up -d --build`; one container (multi-stage Dockerfile on Microsoft's sdk/aspnet images), `./data` mounted at `/data`, `COCKPIT_DB=/data/cockpit.db`, `COCKPIT_SEED_ON_EMPTY=true` for the first start. The port binds to localhost; reach it over Tailscale (`tailscale serve --bg 8080`) or open it on the LAN. `COCKPIT_PASSWORD` enables the single-user login (cookie, 90 days sliding, login rate-limited 5/min/IP) for anything exposed beyond a private network — always behind HTTPS.
+- Backup: `BackupService` inside the app runs SQLite's online backup API once a day after `backup_hour` (server local time), writes `cockpit-yyyyMMdd-HHmmss.db` single-file copies (WAL converted to rollback journal) into `COCKPIT_BACKUP_DIR`, prunes beyond `backup_retention_days` but always keeps the newest three. "Back up now" in Settings. Plus `Export JSON` / `Export Markdown` at any time.
+- Hosting detail worth knowing: the server serves the client through `MapStaticAssets()` (the static web assets endpoint manifest), which gives fingerprinted framework files immutable caching and serves the precompressed `.br`/`.gz` variants; `index.html` references the plain `_framework/blazor.webassembly.js`, which the manifest aliases. Serving the published `wwwroot` with plain `UseStaticFiles` would leave the SDK's `#[.{fingerprint}]` placeholder unprocessed and the app would not boot — that is why `OverrideHtmlAssetPlaceholders` is off.
 
 ## 8. Risks, assumptions, open questions
 
@@ -142,8 +145,9 @@ Open questions
 1. Confirm the three initially active projects and the Day job projects (Seeder.cs, or just change them in the UI).
 2. Should archived areas' tasks disappear from Today immediately (current behaviour) or stay until done?
 3. Priority is low / normal / high — enough, or do you want a numeric rank?
-4. Password gate: cookie login with `COCKPIT_PASSWORD` is planned; do you want it at all if the box is Tailscale-only?
-5. Markdown notes: edit as plain text (current) — do you want a rendered preview (adds the Markdig package)?
+4. Password gate: implemented and off by default (`COCKPIT_PASSWORD` empty). Keep it off on a Tailscale-only box?
+5. Markdown notes: edited as plain text — do you want a rendered preview (would add the Markdig package)?
+6. Backups default to 03:00 server time, 30 days retention; the container's `TZ` is set to Asia/Jerusalem in Compose — correct?
 
 ## 9. Dependencies and why
 

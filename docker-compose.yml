@@ -1,0 +1,29 @@
+# One container. The SQLite file (and its daily backups) live in ./data on the host.
+#
+#   docker compose up -d --build        # build + start
+#   docker compose logs -f cockpit      # watch
+#   docker compose pull && docker compose up -d --build   # update after git pull
+#
+# Access: by default the port is bound to localhost only. Reach it privately with Tailscale:
+#   tailscale serve --bg 8080           # HTTPS on your tailnet, e.g. https://<host>.<tailnet>.ts.net
+# or change "127.0.0.1:8080:8080" to "8080:8080" for plain LAN access (then set COCKPIT_PASSWORD
+# and put HTTPS in front if the machine is reachable from the internet).
+services:
+  cockpit:
+    build: .
+    image: cockpit:local
+    container_name: cockpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      COCKPIT_DB: /data/cockpit.db
+      # Load the starter areas/projects the first time the database is empty.
+      COCKPIT_SEED_ON_EMPTY: "true"
+      # Set a password to require login (single user). Leave empty on a private network.
+      COCKPIT_PASSWORD: ""
+      # Daily SQLite backups: directory, hour (server local time) and retention come from Settings.
+      COCKPIT_BACKUP_DIR: /data/backups
+      TZ: Asia/Jerusalem
+    volumes:
+      - ./data:/data

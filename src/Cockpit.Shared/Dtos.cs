@@ -149,3 +149,30 @@ public sealed class ImportResult
     public int InboxItems { get; set; }
     public int Reviews { get; set; }
 }
+
+// ---- Backups / auth ----
+
+public sealed class BackupFileDto
+{
+    public string FileName { get; set; } = "";
+    public long Bytes { get; set; }
+    public DateTime CreatedUtc { get; set; }
+}
+
+public sealed class BackupStatusDto
+{
+    public string Directory { get; set; } = "";
+    public DateTime? LastRunUtc { get; set; }
+    public List<BackupFileDto> Backups { get; set; } = new();
+}
+
+public sealed class AuthStatusDto
+{
+    public bool Required { get; set; }
+    public bool Authenticated { get; set; }
+}
+
+public sealed class LoginRequest
+{
+    public string Password { get; set; } = "";
+}
