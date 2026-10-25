@@ -49,3 +49,38 @@ public sealed class ApiError
     public List<ProjectSummaryDto>? ActiveProjects { get; set; }
     public Dictionary<string, string[]>? Errors { get; set; }
 }
+
+// ---- Weekly review ----
+
+public sealed class ReviewStepRequest
+{
+    public int Step { get; set; }
+}
+
+public sealed class ReviewFinishRequest
+{
+    public string? Notes { get; set; }
+}
+
+public sealed class ReviewDecisionRequest
+{
+    public Guid ProjectId { get; set; }
+    /// <summary>keep_active | park | done | drop | activate | skip</summary>
+    public string Decision { get; set; } = "";
+    public string? Note { get; set; }
+}
+
+/// <summary>Everything the wizard screens need, derived live from the data.</summary>
+public sealed class ReviewContext
+{
+    public DateOnly Today { get; set; }
+    public int WipLimit { get; set; }
+    public int ActiveCount { get; set; }
+    public int InboxCount { get; set; }
+    public int StaleInboxCount { get; set; }
+    public int StaleDays { get; set; }
+    public List<ProjectCardDto> Active { get; set; } = new();
+    public List<ProjectCardDto> Decide { get; set; } = new();
+    /// <summary>All open (active + parked) projects: the pool for "next week's active".</summary>
+    public List<ProjectCardDto> Candidates { get; set; } = new();
+}

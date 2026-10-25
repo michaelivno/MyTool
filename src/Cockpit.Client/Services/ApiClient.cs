@@ -64,6 +64,21 @@ public sealed class ApiClient(HttpClient http)
     public Task<AreasOverview> GetAreasOverview() => Get<AreasOverview>($"api/views/areas?{T}");
     public Task<NavCounts> GetNavCounts() => Get<NavCounts>($"api/views/nav?{T}");
 
+    // ---- weekly review ----
+    public async Task<ReviewDto?> GetCurrentReview()
+    {
+        using var res = await http.GetAsync("api/reviews/current");
+        if (res.StatusCode == System.Net.HttpStatusCode.NoContent) return null;
+        return await Read<ReviewDto>(res);
+    }
+    public Task<List<ReviewDto>> GetReviews(int limit = 10) => Get<List<ReviewDto>>($"api/reviews?limit={limit}");
+    public Task<ReviewContext> GetReviewContext() => Get<ReviewContext>($"api/reviews/context?{T}");
+    public Task<ReviewDto> StartReview() => Post<ReviewDto>($"api/reviews?{T}", new { });
+    public Task<ReviewDto> ReviewStep(Guid id, int step) => Post<ReviewDto>($"api/reviews/{id}/step", new ReviewStepRequest { Step = step });
+    public Task<ReviewDto> ReviewDecision(Guid id, ReviewDecisionRequest r) => Post<ReviewDto>($"api/reviews/{id}/decisions", r);
+    public Task<ReviewDto> FinishReview(Guid id, string? notes) => Post<ReviewDto>($"api/reviews/{id}/finish?{T}", new ReviewFinishRequest { Notes = notes });
+    public Task<ReviewDto> AbandonReview(Guid id) => Post<ReviewDto>($"api/reviews/{id}/abandon", new { });
+
     // ---- export / import ----
     public Task<ImportResult> Import(ExportDocument doc, ImportMode mode) => Post<ImportResult>($"api/import/json?mode={mode}", doc);
 

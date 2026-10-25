@@ -1,8 +1,379 @@
 @page "/review"
+@inject ApiClient Api
+@inject AppState State
+@inject ToastService Toasts
+@inject IJSRuntime JS
 
 <PageTitle>Weekly review · Cockpit</PageTitle>
 
 <div class="page">
-    <header class="page-head"><h1>Weekly review</h1></header>
-    <EmptyState Icon="↻" Text="The guided weekly review arrives in milestone 4." />
+    <header class="page-head">
+        <h1>Weekly review</h1>
+        @if (_review is not null)
+        {
+            <button type="button" class="link small" @onclick="Abandon">abandon this review</button>
+        }
+    </header>
+
+    @if (_loading)
+    {
+        <p class="muted">Loading…</p>
+    }
+    else if (_review is null)
+    {
+        <div class="card review-landing">
+            <p dir="auto">Twenty minutes, once a week: empty the inbox, walk every active project, decide on the parked ones, pick next week's active @State.Settings.WipLimit, write a note.</p>
+            @if (_history.Count > 0)
+            {
+                var last = _history[0];
+                <p class="muted small">Last review @Format.Ago(last.FinishedAt ?? last.StartedAt) · @last.Decisions.Count decision(s)@(string.IsNullOrWhiteSpace(last.Notes) ? "" : $" · “{last.Notes}”")</p>
+            }
+            <button type="button" class="btn primary" @onclick="Start">Start weekly review</button>
+        </div>
+
+        @if (_history.Count > 0)
+        {
+            <section class="group">
+                <h2 class="group-head">Past reviews</h2>
+                @foreach (var r in _history)
+                {
+                    <details class="card review-item" @key="r.Id">
+                        <summary>
+                            <strong>@r.StartedAt.ToLocalTime().ToString("ddd, d MMM yyyy")</strong>
+                            <span class="chip">@Format.Label(r.Status)</span>
+                            <span class="muted small">@r.Decisions.Count decision(s)</span>
+                        </summary>
+                        @if (!string.IsNullOrWhiteSpace(r.Notes)) { <p class="review-notes" dir="auto">@r.Notes</p> }
+                        @if (r.Decisions.Count > 0)
+                        {
+                            <ul class="summary">
+                                @foreach (var d in r.Decisions) { <li dir="auto"><strong>@d.ProjectName</strong> → @Format.Label(d.Decision)@(string.IsNullOrWhiteSpace(d.Note) ? "" : $" — {d.Note}")</li> }
+                            </ul>
+                        }
+                        @if (r.Snapshot?["end"] is JsonObject end)
+                        {
+                            <p class="muted small">After: @(end["active"]?.AsArray().Count ?? 0) active · @(end["parked"]?.AsArray().Count ?? 0) parked · @(end["overdueTasks"]?.GetValue<int>() ?? 0) overdue tasks · @(end["inboxUnprocessed"]?.GetValue<int>() ?? 0) in inbox</p>
+                        }
+                    </details>
+                }
+            </section>
+        }
+    }
+    else
+    {
+        <ol class="stepper">
+            @for (var i = 0; i <= 4; i++)
+            {
+                var step = i;
+                <li class="@(step == _review.Step ? "current" : step < _review.Step ? "done" : "")">
+                    <button type="button" disabled="@(step > _review.Step)" @onclick="() => Go(step)"><span class="step-no">@(step + 1)</span><span class="step-name">@StepTitles[step]</span></button>
+                </li>
+            }
+        </ol>
+
+        <div class="review-step">
+            @if (_ctx is null)
+            {
+                <p class="muted">Loading…</p>
+            }
+            else
+            {
+                switch (_review.Step)
+                {
+                    case 0:
+                        <h2>Empty the inbox</h2>
+                        <p class="muted small">Turn each capture into a task, a project, a note — or discard it.</p>
+                        @if (_ctx.StaleInboxCount > 0)
+                        {
+                            <div class="warn-banner">⚠ @_ctx.StaleInboxCount item(s) have been sitting here for more than @_ctx.StaleDays days. Process them now, or continue anyway.</div>
+                        }
+                        <InboxProcessor ShowCapture="false" OnChanged="ReloadContext" />
+                        break;
+
+                    case 1:
+                        <h2>Walk every active project</h2>
+                        <p class="muted small">For each one: what moved? What is the next concrete action? Is it still active?</p>
+                        @if (_ctx.Active.Count == 0)
+                        {
+                            <EmptyState Text="No active projects right now. You'll pick some in step 4." />
+                        }
+                        @foreach (var card in _ctx.Active)
+                        {
+                            <article class="card review-project @(DecisionFor(card.Project.Id) is not null ? "decided" : "")" @key="card.Project.Id">
+                                <ProjectCard Card="card" OnMove="s => Move(card.Project, s)" />
+                                @if (card.OpenTaskCount == 0)
+                                {
+                                    <div class="warn-line">⚠ No next action. Add one:</div>
+                                }
+                                <form class="add-row" @onsubmit="() => AddTask(card)" @onsubmit:preventDefault>
+                                    <input class="input" dir="auto" placeholder="Next action…" value="@NewTask(card.Project.Id)" @oninput="e => _newTask[card.Project.Id] = e.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                                    <button type="submit" class="btn" disabled="@string.IsNullOrWhiteSpace(NewTask(card.Project.Id))">Add</button>
+                                </form>
+                                <div class="decide-actions">
+                                    <button type="button" class="btn @(DecisionFor(card.Project.Id) == "keep_active" ? "primary" : "")" @onclick='() => Decide(card, "keep_active")'>Keep active</button>
+                                    <button type="button" class="btn" @onclick='() => Decide(card, "park")'>Park…</button>
+                                    <button type="button" class="btn" @onclick='() => Decide(card, "done")'>Done</button>
+                                    <button type="button" class="btn ghost" @onclick='() => Decide(card, "drop")'>Drop</button>
+                                </div>
+                            </article>
+                        }
+                        break;
+
+                    case 2:
+                        <h2>Decide on parked projects</h2>
+                        <p class="muted small">These passed their revisit date. Parked means decided — decide again.</p>
+                        @if (_ctx.Decide.Count == 0)
+                        {
+                            <EmptyState Text="Nothing waiting for a decision." />
+                        }
+                        @foreach (var card in _ctx.Decide)
+                        {
+                            <article class="card review-project" @key="card.Project.Id">
+                                <ProjectCard Card="card" OnMove="s => Move(card.Project, s)" />
+                                <div class="decide-actions">
+                                    <button type="button" class="btn primary" @onclick='() => Decide(card, "activate")'>Activate</button>
+                                    <button type="button" class="btn" @onclick='() => Decide(card, "park")'>Park again…</button>
+                                    <button type="button" class="btn" @onclick='() => Decide(card, "done")'>Done</button>
+                                    <button type="button" class="btn ghost" @onclick='() => Decide(card, "drop")'>Drop</button>
+                                </div>
+                            </article>
+                        }
+                        break;
+
+                    case 3:
+                        <h2>Choose next week's active projects</h2>
+                        <p class="muted small">At most @_ctx.WipLimit. Everything you leave unchecked gets parked (you'll pick revisit dates).</p>
+                        <p class="@(_chosen.Count > _ctx.WipLimit ? "warn-line" : "ok-line")">Selected @_chosen.Count / @_ctx.WipLimit</p>
+                        @foreach (var group in _ctx.Candidates.GroupBy(c => c.AreaName))
+                        {
+                            <h3 class="group-head"><AreaChip Name="@group.Key" Color="@group.First().AreaColor" /></h3>
+                            <div class="pick-list">
+                                @foreach (var c in group)
+                                {
+                                    var id = c.Project.Id;
+                                    <label class="pick-item @(_chosen.Contains(id) ? "selected" : "")" @key="id">
+                                        <input type="checkbox" checked="@_chosen.Contains(id)" @onchange="e => Toggle(id, (bool?)e.Value ?? false)" />
+                                        <span class="pick-name" dir="auto">@c.Project.Name</span>
+                                        <span class="chip">@Format.Label(c.Project.Status)</span>
+                                        @if (c.Project.Deadline is { } dl) { <span class="chip @Format.DueClass(dl)">⏱ @Format.Date(dl)</span> }
+                                        <span class="muted small">@c.OpenTaskCount open</span>
+                                    </label>
+                                }
+                            </div>
+                        }
+                        break;
+
+                    case 4:
+                        <h2>Notes &amp; finish</h2>
+                        <div class="card">
+                            <p><strong>Active next week (@_ctx.ActiveCount/@_ctx.WipLimit)</strong></p>
+                            <ul class="summary">
+                                @foreach (var c in _ctx.Active) { <li dir="auto">@c.Project.Name <span class="muted small">· @c.AreaName@(c.OpenTaskCount == 0 ? " · ⚠ no next action" : "")</span></li> }
+                            </ul>
+                            @if (_review.Decisions.Count > 0)
+                            {
+                                <p><strong>@_review.Decisions.Count decision(s) this review</strong></p>
+                                <ul class="summary">
+                                    @foreach (var d in _review.Decisions) { <li dir="auto">@d.ProjectName → @Format.Label(d.Decision)</li> }
+                                </ul>
+                            }
+                            @if (_ctx.InboxCount > 0) { <p class="muted small">@_ctx.InboxCount item(s) still in the inbox.</p> }
+                        </div>
+                        <label class="field-label">Notes for this week</label>
+                        <textarea class="input notes-input" rows="5" dir="auto" placeholder="What went well? What to remember next week?" @bind="_notes"></textarea>
+                        break;
+                }
+            }
+        </div>
+
+        <div class="wizard-nav">
+            <button type="button" class="btn" disabled="@(_review.Step == 0 || _busy)" @onclick="Back">← Back</button>
+            @if (_review.Step < 4)
+            {
+                <button type="button" class="btn primary" disabled="@(_busy || (_review.Step == 3 && _ctx is not null && _chosen.Count > _ctx.WipLimit))" @onclick="Next">Next →</button>
+            }
+            else
+            {
+                <button type="button" class="btn primary" disabled="@_busy" @onclick="Finish">Finish review ✓</button>
+            }
+        </div>
+    }
 </div>
+
+<StatusFlow @ref="_flow" />
+
+@code {
+    private static readonly string[] StepTitles = { "Inbox", "Projects", "Decide", "Choose", "Finish" };
+
+    private bool _loading = true, _busy;
+    private ReviewDto? _review;
+    private ReviewContext? _ctx;
+    private List<ReviewDto> _history = new();
+    private readonly HashSet<Guid> _chosen = new();
+    private readonly Dictionary<Guid, string> _newTask = new();
+    private string _notes = "";
+    private StatusFlow _flow = default!;
+
+    private string NewTask(Guid id) => _newTask.TryGetValue(id, out var v) ? v : "";
+    private string? DecisionFor(Guid projectId) => _review?.Decisions.FirstOrDefault(d => d.ProjectId == projectId)?.Decision;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _review = await Api.GetCurrentReview();
+            if (_review is not null) { _notes = _review.Notes ?? ""; await ReloadContext(); }
+            else _history = await Api.GetReviews();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+        _loading = false;
+    }
+
+    private async Task ReloadContext()
+    {
+        try
+        {
+            _ctx = await Api.GetReviewContext();
+            if (_review?.Step == 3 && _chosen.Count == 0)
+                foreach (var c in _ctx.Active) _chosen.Add(c.Project.Id);
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Start()
+    {
+        try { _review = await Api.StartReview(); _notes = _review.Notes ?? ""; await ReloadContext(); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private Task Back() => Go(_review!.Step - 1);
+
+    private async Task Next()
+    {
+        if (_review is null || _ctx is null) return;
+        if (_review.Step == 3 && !await ApplyChoicesAsync()) return;
+        await Go(_review.Step + 1);
+    }
+
+    private async Task Go(int step)
+    {
+        if (_review is null) return;
+        _busy = true;
+        try
+        {
+            _review = await Api.ReviewStep(_review.Id, step);
+            if (step == 3) { _chosen.Clear(); }
+            await ReloadContext();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+        _busy = false;
+    }
+
+    /// <summary>Step 4 → 5: park what was unchecked, activate what was checked, record the decisions.</summary>
+    private async Task<bool> ApplyChoicesAsync()
+    {
+        if (_ctx is null || _review is null) return false;
+        _busy = true;
+        try
+        {
+            // Park first so the activations never trip the WIP limit mid-way.
+            foreach (var c in _ctx.Candidates.Where(c => c.Project.Status == ProjectStatus.Active && !_chosen.Contains(c.Project.Id)))
+            {
+                c.Project.RevisitAt = null;
+                if (await _flow.ChangeStatusAsync(c.Project, ProjectStatus.Parked) is null) return false;
+                await Record(c.Project.Id, "park");
+            }
+            foreach (var c in _ctx.Candidates.Where(c => c.Project.Status != ProjectStatus.Active && _chosen.Contains(c.Project.Id)))
+            {
+                if (await _flow.ChangeStatusAsync(c.Project, ProjectStatus.Active) is null) return false;
+                await Record(c.Project.Id, "activate");
+            }
+            return true;
+        }
+        finally { _busy = false; }
+    }
+
+    private void Toggle(Guid id, bool on) { if (on) _chosen.Add(id); else _chosen.Remove(id); }
+
+    private async Task Decide(ProjectCardDto card, string decision)
+    {
+        var target = decision switch
+        {
+            "park" => ProjectStatus.Parked,
+            "done" => ProjectStatus.Done,
+            "drop" => ProjectStatus.Dropped,
+            "activate" => ProjectStatus.Active,
+            _ => (ProjectStatus?)null,
+        };
+        if (target is { } s)
+        {
+            if (s == ProjectStatus.Parked) card.Project.RevisitAt = null; // always ask for a fresh date during the review
+            if (await _flow.ChangeStatusAsync(card.Project, s) is null) return;
+        }
+        await Record(card.Project.Id, decision);
+        await ReloadContext();
+    }
+
+    private async Task Move(ProjectDto p, ProjectStatus s)
+    {
+        if (await _flow.ChangeStatusAsync(p, s) is null) return;
+        await Record(p.Id, s switch { ProjectStatus.Active => "activate", ProjectStatus.Parked => "park", ProjectStatus.Done => "done", _ => "drop" });
+        await ReloadContext();
+    }
+
+    private async Task Record(Guid projectId, string decision)
+    {
+        if (_review is null) return;
+        try { _review = await Api.ReviewDecision(_review.Id, new ReviewDecisionRequest { ProjectId = projectId, Decision = decision }); }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task AddTask(ProjectCardDto card)
+    {
+        var title = NewTask(card.Project.Id).Trim();
+        if (title.Length == 0) return;
+        try
+        {
+            await Api.CreateTask(new TaskDto { ProjectId = card.Project.Id, AreaId = card.Project.AreaId, Title = title });
+            _newTask[card.Project.Id] = "";
+            _ = State.RefreshNavAsync();
+            await ReloadContext();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+
+    private async Task Finish()
+    {
+        if (_review is null) return;
+        _busy = true;
+        try
+        {
+            await Api.FinishReview(_review.Id, _notes);
+            Toasts.Success("Review finished. See you next week.");
+            _review = null;
+            _chosen.Clear();
+            _history = await Api.GetReviews();
+            _ = State.RefreshNavAsync();
+        }
+        catch (ApiException ex) when (ex.IsWipLimit)
+        {
+            Toasts.Error(ex);
+            await Go(3);
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+        _busy = false;
+    }
+
+    private async Task Abandon()
+    {
+        if (_review is null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", "Abandon this review? Decisions already applied to projects stay; the review is recorded as abandoned.")) return;
+        try
+        {
+            await Api.AbandonReview(_review.Id);
+            _review = null;
+            _history = await Api.GetReviews();
+        }
+        catch (Exception ex) { Toasts.Error(ex); }
+    }
+}

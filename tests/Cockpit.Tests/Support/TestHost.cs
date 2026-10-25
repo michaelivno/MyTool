@@ -24,6 +24,7 @@ public sealed class TestHost : IAsyncDisposable
     public ExportService Export { get; }
     public ExportService Import => Export;
     public Seeder Seeder { get; }
+    public ReviewService Reviews { get; }
 
     private TestHost(SqliteConnection conn, DbContextOptions<CockpitDbContext> options, FakeClock clock)
     {
@@ -40,6 +41,7 @@ public sealed class TestHost : IAsyncDisposable
         Views = new ViewsService(Db, Settings, Inbox);
         Export = new ExportService(Db, Settings, clock);
         Seeder = new Seeder(Db, Settings);
+        Reviews = new ReviewService(Db, Settings, Inbox, Views, clock);
     }
 
     public static async Task<TestHost> CreateAsync()

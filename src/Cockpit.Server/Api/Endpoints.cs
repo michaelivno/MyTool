@@ -68,6 +68,17 @@ public static class Endpoints
         api.MapGet("/views/areas", async (DateOnly? today, ViewsService s, IClock clock, CancellationToken ct) => Results.Ok(await s.AreasAsync(today ?? clock.Today, ct)));
         api.MapGet("/views/nav", async (DateOnly? today, ViewsService s, IClock clock, CancellationToken ct) => Results.Ok(await s.NavCountsAsync(today ?? clock.Today, ct)));
 
+        // ---- Weekly review ----
+        api.MapGet("/reviews", async (int? limit, ReviewService s, CancellationToken ct) => Results.Ok(await s.ListAsync(limit ?? 20, ct)));
+        api.MapGet("/reviews/current", async (ReviewService s, CancellationToken ct) => await s.GetCurrentAsync(ct) is { } r ? Results.Ok(r) : Results.NoContent());
+        api.MapGet("/reviews/context", async (DateOnly? today, ReviewService s, IClock clock, CancellationToken ct) => Results.Ok(await s.ContextAsync(today ?? clock.Today, ct)));
+        api.MapGet("/reviews/{id:guid}", async (Guid id, ReviewService s, CancellationToken ct) => await s.GetAsync(id, ct) is { } r ? Results.Ok(r) : NotFound("Review"));
+        api.MapPost("/reviews", async (DateOnly? today, ReviewService s, IClock clock, CancellationToken ct) => Results.Ok(await s.StartOrResumeAsync(today ?? clock.Today, ct)));
+        api.MapPost("/reviews/{id:guid}/step", async (Guid id, ReviewStepRequest req, ReviewService s, CancellationToken ct) => Send(await s.MoveToStepAsync(id, req.Step, ct)));
+        api.MapPost("/reviews/{id:guid}/decisions", async (Guid id, ReviewDecisionRequest req, ReviewService s, CancellationToken ct) => Send(await s.AddDecisionAsync(id, req, ct)));
+        api.MapPost("/reviews/{id:guid}/finish", async (Guid id, ReviewFinishRequest req, DateOnly? today, ReviewService s, IClock clock, CancellationToken ct) => Send(await s.FinishAsync(id, req.Notes, today ?? clock.Today, ct)));
+        api.MapPost("/reviews/{id:guid}/abandon", async (Guid id, ReviewService s, CancellationToken ct) => Send(await s.AbandonAsync(id, ct)));
+
         // ---- Export / import ----
         api.MapGet("/export/json", async (ExportService s, IClock clock, CancellationToken ct) =>
         {
